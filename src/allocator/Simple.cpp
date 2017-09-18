@@ -281,13 +281,11 @@ Pointer Simple::alloc(size_t N) {
 
   FreeSpace* start_info = info(move(Pointer::base, Pointer::size - m));
   if (start_info->size == 0) {
-    std::cout << "i have eaten all your memory. it's a joke." << std::endl;
     throw AllocError(AllocErrorType::NoMemory, "i have eaten all your memory. it's a joke. No place...");
     return Pointer();
   }
 
   if (not isPlaceForPointer()) {
-    std::cout << "i have eaten all your memory. it's a joke. <= N + 2*m" << std::endl;
     throw AllocError(AllocErrorType::NoMemory, "i have eaten all your memory. it's a joke.");
     return Pointer();
   }
@@ -299,14 +297,12 @@ Pointer Simple::alloc(size_t N) {
   void* cur = cp.second;
 
   if (cur == NULL) {
-    std::cout << "i have eaten all your memory. it's a joke. cur==NULL" << std::endl;
     throw AllocError(AllocErrorType::NoMemory, "i have eaten all your memory. it's a joke.");
     return Pointer();
   }
   else {
     FreeSpace* cur_info = info(cur);
     if ((cur == FreeSpace::last_chain) && not isPlaceForPointer((N + m - 1) / m * m)) {
-        std::cout << "i have eaten all your memory. it's a joke. size+2*m" << std::endl;
         throw AllocError(AllocErrorType::NoMemory, "i have eaten all your memory. it's a joke.");
         return Pointer();
     }
