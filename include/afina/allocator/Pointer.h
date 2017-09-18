@@ -1,5 +1,6 @@
 #ifndef AFINA_ALLOCATOR_POINTER_H
 #define AFINA_ALLOCATOR_POINTER_H
+#include "stddef.h"
 
 namespace Afina {
 namespace Allocator {
@@ -7,9 +8,21 @@ namespace Allocator {
 // to avoid expensive macros calculations and increase compile speed
 class Simple;
 
+struct FreeSpace {
+  static void*  last_chain;
+  static ptrdiff_t  pointer_info_start;
+  size_t        size;
+  ptrdiff_t     diff;
+};
+
 class Pointer {
 public:
+    static void*     base;
+    static size_t    size;
+
+    FreeSpace* ptr; 
     Pointer();
+    Pointer(FreeSpace* _ptr);
 
     Pointer(const Pointer &);
     Pointer(Pointer &&);
@@ -17,7 +30,7 @@ public:
     Pointer &operator=(const Pointer &);
     Pointer &operator=(Pointer &&);
 
-    void *get() const { return 0; }
+    void* get() const; 
 };
 
 } // namespace Allocator
