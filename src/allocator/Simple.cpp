@@ -61,14 +61,14 @@ void Simple::insertBlock(void* prev, void* base, size_t size) {
   FreeSpace* start_info = info(move(this->base, this->size - m));
   void* new_base = NULL;
 
-  if (cur->size < new_size) {
+  if (cur->size < size) {
     throw std::runtime_error("");
   }
-  if (cur->size >= new_size + m) {
+  if (cur->size >= size + m) {
     /*
      * Part of the cell is left
      */
-    new_base = move(base, new_size);
+    new_base = move(base, size);
     if (base == this->last_chain) {
       this->last_chain = new_base;
     }
@@ -83,7 +83,7 @@ void Simple::insertBlock(void* prev, void* base, size_t size) {
       start_info->diff = dst(this->base, new_base);
     }
   } 
-  else if (cur->size == new_size) {
+  else if (cur->size < size + m) {
     /*
      * Delete whole cell
      */
@@ -287,11 +287,11 @@ Pointer Simple::alloc(size_t N) {
   }
   else {
     FreeSpace* cur_info = info(cur);
-    if ((cur == this->last_chain) && not this->isPlaceForPointer((N + m - 1) / m * m)) {
+    if ((cur == this->last_chain) && not this->isPlaceForPointer(N)) {
         throw AllocError(AllocErrorType::NoMemory, "i have eaten all your memory. it's a joke.");
     }
     this->insertBlock(prev, cur, N);
-    FreeSpace* res = this->registerPointer(dst(this->base, cur), ((N + m - 1) / m) * m); // for return 
+    FreeSpace* res = this->registerPointer(dst(this->base, cur), N); // for return 
     return Pointer(this->base, res);
   }
 }
