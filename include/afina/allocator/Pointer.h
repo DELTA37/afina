@@ -9,20 +9,18 @@ namespace Allocator {
 class Simple;
 
 struct FreeSpace {
-  static void*  last_chain;
-  static ptrdiff_t  pointer_info_start;
   size_t        size;
   ptrdiff_t     diff;
 };
 
 class Pointer {
 public:
-    static void*     base;
-    static size_t    size;
-
     FreeSpace* ptr; 
+    void* base;
+
     Pointer();
-    Pointer(FreeSpace* _ptr);
+    Pointer(void* base);
+    Pointer(void* base, FreeSpace* _ptr);
 
     Pointer(const Pointer &);
     Pointer(Pointer &&);

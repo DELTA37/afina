@@ -9,7 +9,7 @@ namespace Allocator {
 // Forward declaration. Do not include real class definition
 // to avoid expensive macros calculations and increase compile speed
 class Pointer;
-
+struct FreeSpace;
 /**
  * Wraps given memory area and provides defagmentation allocator interface on
  * the top of it.
@@ -47,6 +47,26 @@ public:
      * TODO: semantics
      */
     std::string dump() const;
+private:
+  void* base;
+  size_t size;
+  void* last_chain;
+  ptrdiff_t pointer_info_start;
+
+  void setFirstBlock(ptrdiff_t _diff);
+  void* findFirstBlock(void);
+  void unite(void* cur);
+  int unregisterPointer(ptrdiff_t diff, size_t size);
+  void unregisterPointer(FreeSpace* memreg);
+  std::pair<void*, void*> findEnoughFree(void* base, size_t N);
+  void setBlock(void* base, size_t size, ptrdiff_t diff);
+  void insertBlock(void* prev, void* base, size_t size);
+  void* findPrevious(void* base, void* mem);
+  bool isPlaceForPointer(void);
+  bool isPlaceForPointer(size_t size);
+  FreeSpace* registerPointer(ptrdiff_t diff, size_t size);
+  void placeTo(FreeSpace* p_inf, ptrdiff_t where);
+  FreeSpace* getNext(ptrdiff_t l);
 };
 
 } // namespace Allocator
