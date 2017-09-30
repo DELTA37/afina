@@ -42,9 +42,21 @@ bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &valu
   else {
     this->_lock.lock();
     std::get<0>(it->second) = value;
-    this->_lock.unlock();
+    std::string prev = std::get<1>(it->second);
+    std::string next = std::get<2>(it->second);
+
+    std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_pr = this->_backend.find(prev);
+    std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_ne = this->_backend.find(next);
+
+    if (it_pr != this->_backend.end()) {
+      std::get<2>(it_pr->second) = next;
+    }
+    if (it_ne != this->_backend.end()) {
+      std::get<1>(it_ne->second) = prev;
+    }
   }
 
+  this->_lock.unlock();
   return true; 
 }
 
@@ -76,6 +88,20 @@ bool MapBasedGlobalLockImpl::PutIfAbsent(const std::string &key, const std::stri
       std::get<2>(it_pr->second) = key;
       this->_previous = key;
 
+      std::string prev = std::get<1>(it->second);
+      std::string next = std::get<2>(it->second);
+
+      it_pr = this->_backend.find(prev);
+      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_ne = this->_backend.find(next);
+
+      if (it_pr != this->_backend.end()) {
+        std::get<2>(it_pr->second) = next;
+      }
+      if (it_ne != this->_backend.end()) {
+        std::get<1>(it_ne->second) = prev;
+      }
+
+    
       this->_lock.unlock();
     }
 
@@ -93,6 +119,21 @@ bool MapBasedGlobalLockImpl::Set(const std::string &key, const std::string &valu
       this->_lock.lock();
       std::get<0>(it->second) = value;
       this->_lock.unlock();
+
+      std::string prev = std::get<1>(it->second);
+      std::string next = std::get<2>(it->second);
+
+      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_pr = this->_backend.find(prev);
+      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_ne = this->_backend.find(next);
+
+      if (it_pr != this->_backend.end()) {
+        std::get<2>(it_pr->second) = next;
+      }
+      if (it_ne != this->_backend.end()) {
+        std::get<1>(it_ne->second) = prev;
+      }
+
+
     } else {
       return false;
     }
@@ -132,6 +173,7 @@ bool MapBasedGlobalLockImpl::Get(const std::string &key, std::string &value) con
     return false; 
   } else {
     value = std::get<0>(it->second);
+
     return true;
   }
 }
