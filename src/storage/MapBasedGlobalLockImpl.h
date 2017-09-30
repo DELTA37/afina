@@ -4,7 +4,7 @@
 #include <map>
 #include <mutex>
 #include <string>
-
+#include <queue>
 #include <afina/Storage.h>
 
 namespace Afina {
@@ -17,7 +17,7 @@ namespace Backend {
  */
 class MapBasedGlobalLockImpl : public Afina::Storage {
 public:
-    MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size), _now(0) {}
+    MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size), _now(0), _last(""), _previous("") {}
     ~MapBasedGlobalLockImpl() {}
 
     // Implements Afina::Storage interface
@@ -41,7 +41,9 @@ private:
     size_t _max_size;
     size_t _now;
 
-    std::map<std::string, std::string> _backend;
+    std::map<std::string, std::tuple<std::string, std::string, std::string>> _backend;
+    std::string _last;
+    std::string _previous;
 };
 
 } // namespace Backend
