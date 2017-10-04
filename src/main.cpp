@@ -8,6 +8,8 @@
 
 #include "network/Server.h"
 #include "storage/MapBasedGlobalLockImpl.h"
+#include <unistd.h>
+#include <string.h>
 
 typedef struct {
     std::shared_ptr<Afina::Storage> storage;
@@ -29,6 +31,49 @@ void timer_handler(uv_timer_t *handle) {
 }
 
 int main(int argc, char **argv) {
+    bool daemon_mode = false;
+    bool p_mode = false;
+    char filename[100];
+    if (argc > 1) {
+      for (size_t i = 1; i < argc; i++) {
+        printf("%s\n", argv[i]);
+        if (strcmp(argv[i], "-p") == 0) {
+          if (i == argc - 1 && not p_mode) {
+            printf("Usage:\n-p print pid\n-d devil(daemon) mode");
+            return -1;
+          }
+          strcpy(filename, argv[i + 1]);
+          printf("%s\n", argv[i + 1]);
+          p_mode = true;
+          i++;
+        } else if (strcmp(argv[i], "-d") == 0) {
+          daemon_mode = true;
+        }
+      }
+    }
+    if (p_mode) {
+      FILE* fp;
+      fp = fopen(filename, "w");
+      fprintf(fp, "%u", getpid());
+      fclose(fp);
+    }
+    if (daemon_mode) {
+      pid_t p = fork();
+      if (p != 0) {
+        exit(EXIT_SUCCESS);
+      } else {
+        if (p_mode) {
+          FILE* fp;
+          fp = fopen(filename, "w");
+          fprintf(fp, "%u", getpid());
+          fclose(fp);
+        }
+        setsid();
+        fclose(stdin);
+        fclose(stdout);
+        fclose(stderr);
+      }
+    }
     std::cout << "Starting Afina " << Afina::Version_Major << "." << Afina::Version_Minor << "."
               << Afina::Version_Patch;
     if (Afina::Version_SHA.size() > 0) {

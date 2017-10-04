@@ -173,7 +173,6 @@ bool MapBasedGlobalLockImpl::Get(const std::string &key, std::string &value) con
     return false; 
   } else {
     value = std::get<0>(it->second);
-
     return true;
   }
 }
