@@ -102,13 +102,26 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
 
 // See Server.h
 void ServerImpl::Stop() {
-    std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    running.store(false);
+  std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
+  if (pthread_kill(this->accept_thread, 0) == 0) {
+    pthread_cancel(this->accept_thread);
+  }
+
+  running.store(false);
+ 
+  for (auto it = this->connections.begin(); it != this->connections.end(); ) {
+    if (pthread_kill(*it, 0) != 0) {
+      it = this->connections.erase(it);
+    } else {
+      pthread_join(*it, NULL);
+    }
+  }
 }
 
 // See Server.h
 void ServerImpl::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
+
     pthread_join(accept_thread, 0);
 }
 
@@ -182,6 +195,13 @@ void ServerImpl::RunAcceptor() {
             close(server_socket);
             throw std::runtime_error("Socket accept() failed");
         }
+        for (auto it = this->connections.begin(); it != this->connections.end();) {
+          if (pthread_kill(*it, 0) != 0) {
+            it = this->connections.erase(it);
+          } else {
+            ++it;
+          }
+        }
         if (this->connections.size() < this->max_workers) {
           pthread_t client_thread;
           auto srv_pair = std::make_pair(this, client_socket);
@@ -192,13 +212,6 @@ void ServerImpl::RunAcceptor() {
         } else {
           std::cout << "network debug: maximum number of workers is achieved." << std::endl;
           close(client_socket);
-        }
-        for (auto it = this->connections.begin(); it != this->connections.end();) {
-          if (pthread_kill(*it, 0) != 0) {
-            it = this->connections.erase(it);
-          } else {
-            ++it;
-          }
         }
     }
     // Cleanup on exit...
