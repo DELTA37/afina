@@ -35,7 +35,6 @@ void timer_handler(uv_timer_t *handle) {
 }
 
 int main(int argc, char **argv) {
-<<<<<<< HEAD
     bool daemon_mode = false;
     bool p_mode = false;
     char filename[100];
