@@ -160,20 +160,20 @@ bool Parser::Parse(const char *input, const size_t size, size_t &parsed) {
 }
 
 // See Parse.h
-std::shared_ptr<Execute::Command> Parser::Build(uint32_t &body_size) const {
+std::unique_ptr<Execute::Command> Parser::Build(uint32_t &body_size) const {
     if (state != State::sLF) {
         return std::unique_ptr<Execute::Command>(nullptr);
     }
 
     body_size = bytes;
     if (name == "set") {
-        return std::shared_ptr<Execute::Command>(new Execute::Set(keys[0], flags, exprtime));
+        return std::unique_ptr<Execute::Command>(new Execute::Set(keys[0], flags, exprtime));
     } else if (name == "add") {
-        return std::shared_ptr<Execute::Command>(new Execute::Add(keys[0], flags, exprtime));
+        return std::unique_ptr<Execute::Command>(new Execute::Add(keys[0], flags, exprtime));
     } else if (name == "append") {
-        return std::shared_ptr<Execute::Command>(new Execute::Append(keys[0], flags, exprtime));
+        return std::unique_ptr<Execute::Command>(new Execute::Append(keys[0], flags, exprtime));
     } else if (name == "get") {
-        return std::shared_ptr<Execute::Command>(new Execute::Get(keys));
+        return std::unique_ptr<Execute::Command>(new Execute::Get(keys));
     } else {
         throw new std::runtime_error("Unsupported command");
     }

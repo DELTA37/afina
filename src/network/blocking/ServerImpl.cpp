@@ -17,6 +17,7 @@
 #include <netinet/in.h>
 #include <unistd.h>
 
+#include <afina/execute/Command.h>
 #include <afina/Storage.h>
 
 namespace Afina {
@@ -27,6 +28,18 @@ void *ServerImpl::RunAcceptorProxy(void *p) {
     ServerImpl *srv = reinterpret_cast<ServerImpl *>(p);
     try {
         srv->RunAcceptor();
+    } catch (std::runtime_error &ex) {
+        std::cerr << "Server fails: " << ex.what() << std::endl;
+    }
+    return 0;
+}
+
+void *ServerImpl::RunConnectionProxy(void *p) {
+    auto *srv_pair = reinterpret_cast<std::pair<ServerImpl*, int>*>(p);
+    ServerImpl* srv = srv_pair->first;
+    int client_socket = srv_pair->second;
+    try {
+        srv->RunConnection(client_socket);
     } catch (std::runtime_error &ex) {
         std::cerr << "Server fails: " << ex.what() << std::endl;
     }
@@ -169,25 +182,96 @@ void ServerImpl::RunAcceptor() {
             close(server_socket);
             throw std::runtime_error("Socket accept() failed");
         }
-
-        // TODO: Start new thread and process data from/to connection
-        {
-            std::string msg = "TODO: start new thread and process memcached protocol instead";
-            if (send(client_socket, msg.data(), msg.size(), 0) <= 0) {
-                close(client_socket);
-                close(server_socket);
-                throw std::runtime_error("Socket send() failed");
-            }
-            close(client_socket);
+        if (this->connections.size() < this->max_workers) {
+          pthread_t client_thread;
+          auto srv_pair = std::make_pair(this, client_socket);
+          if (pthread_create(&client_thread, NULL, ServerImpl::RunConnectionProxy, &srv_pair) < 0) {
+            throw std::runtime_error("Could not create client connection thread");
+          }
+          this->connections.push_back(client_thread);
+        } else {
+          std::cout << "network debug: maximum number of workers is achieved." << std::endl;
+          close(client_socket);
+        }
+        for (auto it = this->connections.begin(); it != this->connections.end();) {
+          if (pthread_kill(*it, 0) != 0) {
+            it = this->connections.erase(it);
+          } else {
+            ++it;
+          }
         }
     }
-
     // Cleanup on exit...
     close(server_socket);
 }
 
 // See Server.h
-void ServerImpl::RunConnection() { std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl; }
+void ServerImpl::RunConnection(int client_socket) { 
+  std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl; 
+  int sendbuf_len; 
+  socklen_t sendbuf_type_size = sizeof(sendbuf_len);
+  if (getsockopt(client_socket, SOL_SOCKET, SO_SNDBUF, &sendbuf_len, &sendbuf_type_size)) {
+    throw std::runtime_error("Socket getsockopt() failed");
+  }
+
+  char buf[sendbuf_len + 1];
+  std::string command_buf;
+  ssize_t s;
+  size_t parsed; 
+  Protocol::Parser parser;
+  uint32_t body_size;
+  
+  while (running.load()) {
+    std::string out("");
+
+    if ((s = recv(client_socket, buf, sendbuf_len, 0)) < 0) {
+      close(client_socket);
+      throw std::runtime_error("Socket recv() failed");
+    }
+    if (s == 0) {
+      break;
+    }
+    buf[s] = '\0';
+    std::cout << "network debug: " << "received command: " << std::string(buf) << std::endl;
+
+    command_buf += std::string(buf);
+
+    bool b = parser.Parse(command_buf.data(), s, parsed);
+    command_buf.erase(0, parsed);
+
+    if (b) {
+      auto com = parser.Build(body_size);
+
+      if (body_size > 0) {
+        std::cout << "network debug: " << "parsed command, " << std::endl 
+          << "body_size = " << body_size << std::endl
+          << "parsed = " << parsed << std::endl;
+
+        while(command_buf.size() < body_size) {
+          ssize_t t = recv(client_socket, buf, sendbuf_len, 0);
+          if (t < 0) {
+            close(client_socket);
+            throw std::runtime_error("Cannot read arguments, socket recv() failed");
+          }
+          buf[t] = '\0';
+          command_buf += std::string(buf);
+        }
+
+        std::cout << "network debug: " << "received arguments" << std::endl; 
+        std::string args;
+        std::copy(command_buf.begin(), command_buf.begin() + body_size, std::back_inserter(args));
+        command_buf.erase(0, body_size);
+        com->Execute(*this->pStorage, args, out);
+        if (send(client_socket, out.data(), out.size(), 0) <= 0) {
+          close(client_socket);
+          throw std::runtime_error("Socket send() failed");
+        }
+        std::cout << "network debug: " << "executed command and sent results" << std::endl; 
+      }
+    }
+  }
+  close(client_socket);
+}
 
 } // namespace Blocking
 } // namespace Network
