@@ -2,6 +2,7 @@
 #define AFINA_NETWORK_BLOCKING_SERVER_H
 
 #include <atomic>
+#include <mutex>
 #include <vector>
 #include <pthread.h>
 
@@ -44,6 +45,9 @@ private:
     static void *RunAcceptorProxy(void *p);
     static void *RunConnectionProxy(void *p);
 
+    static void cleanup_acceptor(void* args);
+    static void cleanup_connection(void* args);
+
     // Atomic flag to notify threads when it is time to stop. Note that
     // flag must be atomic in order to safely publisj changes cross thread
     // bounds
@@ -65,6 +69,10 @@ private:
     // Threads that are processing connection data, permits
     // access only from inside of accept_thread
     std::vector<pthread_t> connections;
+    std::mutex connections_mutex;
+
+    std::vector<pthread_t> joined;
+    std::mutex joined_mutex;
 };
 
 } // namespace Blocking

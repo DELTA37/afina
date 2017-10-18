@@ -24,6 +24,33 @@ namespace Afina {
 namespace Network {
 namespace Blocking {
 
+
+void ServerImpl::cleanup_acceptor(void* args) {
+  std::cout << __PRETTY_FUNCTION__ << "cleanup_acceptor" << std::endl;
+  int server_socket = *reinterpret_cast<int*>(args);
+  close(server_socket);
+}
+
+void ServerImpl::cleanup_connection(void* args) {
+  std::cout << __PRETTY_FUNCTION__ << "cleanup_connection" << std::endl;
+  std::tuple<ServerImpl*, pthread_t, int> arg_parse = *reinterpret_cast<std::tuple<ServerImpl*, pthread_t, int>*>(args);
+  ServerImpl* serv = std::get<0>(arg_parse);
+  pthread_t myid = std::get<1>(arg_parse);
+  int client_socket = std::get<2>(arg_parse);
+
+  serv->connections_mutex.lock();
+  for (auto it = serv->connections.begin(); it != serv->connections.end(); ++it) {
+    if (pthread_equal(*it, myid)) {
+      serv->connections.erase(it);
+      break;
+    }
+  }
+  serv->connections_mutex.unlock();
+
+  close(client_socket);
+}
+
+
 void *ServerImpl::RunAcceptorProxy(void *p) {
     ServerImpl *srv = reinterpret_cast<ServerImpl *>(p);
     try {
@@ -103,25 +130,40 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
 // See Server.h
 void ServerImpl::Stop() {
   std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-  if (pthread_kill(this->accept_thread, 0) == 0) {
-    pthread_cancel(this->accept_thread);
-  }
 
   running.store(false);
- 
-  for (auto it = this->connections.begin(); it != this->connections.end(); ) {
-    if (pthread_kill(*it, 0) != 0) {
-      it = this->connections.erase(it);
-    } else {
-      pthread_join(*it, NULL);
-    }
+  int n;
+  this->connections_mutex.lock();
+  n = this->connections.size();
+  this->connections_mutex.unlock();
+  while (n > 0) {
+    this->connections_mutex.lock();
+    pthread_t th = this->connections[n - 1];
+    this->connections_mutex.unlock();
+    pthread_join(th, NULL);
+    n--;
   }
+  this->connections_mutex.unlock();
+
+  std::cout << "i am here" << std::endl;
+  pthread_cancel(this->accept_thread);
 }
 
 // See Server.h
 void ServerImpl::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-
+    pthread_t myid = pthread_self();
+    this->joined_mutex.lock();
+    this->joined.push_back(myid);
+    this->joined_mutex.unlock();
+    this->connections_mutex.lock();
+    for (auto it = this->connections.begin(); it != this->connections.end(); ++it) {
+      if (pthread_equal(*it, myid)) {
+        this->connections.erase(it);
+        break;
+      }
+    }
+    this->connections_mutex.unlock();
     pthread_join(accept_thread, 0);
 }
 
@@ -154,6 +196,8 @@ void ServerImpl::RunAcceptor() {
         throw std::runtime_error("Failed to open socket");
     }
 
+    auto args = std::make_tuple();
+    pthread_cleanup_push(ServerImpl::cleanup_acceptor, this);
     // when the server closes the socket,the connection must stay in the TIME_WAIT state to
     // make sure the client received the acknowledgement that the connection has been terminated.
     // During this time, this port is unavailable to other processes, unless we specify this option
@@ -195,31 +239,35 @@ void ServerImpl::RunAcceptor() {
             close(server_socket);
             throw std::runtime_error("Socket accept() failed");
         }
-        for (auto it = this->connections.begin(); it != this->connections.end();) {
-          if (pthread_kill(*it, 0) != 0) {
-            it = this->connections.erase(it);
-          } else {
-            ++it;
-          }
-        }
+        this->connections_mutex.lock();
         if (this->connections.size() < this->max_workers) {
+          this->connections_mutex.unlock();
           pthread_t client_thread;
           auto srv_pair = std::make_pair(this, client_socket);
           if (pthread_create(&client_thread, NULL, ServerImpl::RunConnectionProxy, &srv_pair) < 0) {
             throw std::runtime_error("Could not create client connection thread");
           }
-          this->connections.push_back(client_thread);
         } else {
+          this->connections_mutex.unlock();
           std::cout << "network debug: maximum number of workers is achieved." << std::endl;
           close(client_socket);
         }
     }
     // Cleanup on exit...
     close(server_socket);
+    pthread_cleanup_pop(0);
 }
 
 // See Server.h
 void ServerImpl::RunConnection(int client_socket) { 
+  pthread_t myid = pthread_self();
+
+  auto args = std::make_tuple(this, myid, client_socket);
+  pthread_cleanup_push(ServerImpl::cleanup_connection, &args);
+
+  this->connections_mutex.lock();
+  this->connections.push_back(myid);
+  this->connections_mutex.unlock();
   std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl; 
   int sendbuf_len; 
   socklen_t sendbuf_type_size = sizeof(sendbuf_len);
@@ -283,6 +331,16 @@ void ServerImpl::RunConnection(int client_socket) {
       }
     }
   }
+  this->connections_mutex.lock();
+  for (auto it = this->connections.begin(); it != this->connections.end(); ++it) {
+    if (pthread_equal(*it, myid)) {
+      this->connections.erase(it);
+      break;
+    }
+  }
+  this->connections_mutex.unlock();
+  pthread_cleanup_pop(0);
+
   close(client_socket);
 }
 
