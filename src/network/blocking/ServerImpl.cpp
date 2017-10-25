@@ -29,6 +29,11 @@ void ServerImpl::cleanup_acceptor(void* args) {
   std::cout << __PRETTY_FUNCTION__ << "cleanup_acceptor" << std::endl;
   int server_socket = *reinterpret_cast<int*>(args);
   close(server_socket);
+  // Wait until for all connections to be complete
+  std::unique_lock<std::mutex> __lock(connections_mutex);
+  while (!connections.empty()) {
+      connections_cv.wait(__lock);
+  }
 }
 
 void ServerImpl::cleanup_connection(void* args) {
@@ -135,9 +140,6 @@ void ServerImpl::Stop() {
 void ServerImpl::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     pthread_t myid = pthread_self();
-    this->joined_mutex.lock();
-    this->joined.push_back(myid);
-    this->joined_mutex.unlock();
     this->connections_mutex.lock();
     for (auto it = this->connections.begin(); it != this->connections.end(); ++it) {
       if (pthread_equal(*it, myid)) {
@@ -237,7 +239,7 @@ void ServerImpl::RunAcceptor() {
     }
     
     this->connections_mutex.lock();
-    std::unordered_set<pthread_t, std::hash<pthread_t>, pthread_equal, std::allocator<pthread_t>> cons(this->connections);
+    ServerImpl::PthreadSet cons(this->connections);
     this->connections_mutex.unlock();
     for (auto it = cons.begin(); it != cons.end(); ++it) {
       void* ret;
@@ -257,7 +259,7 @@ void ServerImpl::RunConnection(int client_socket) {
   pthread_cleanup_push(ServerImpl::cleanup_connection, &args);
 
   this->connections_mutex.lock();
-  this->connections.push_back(myid);
+  this->connections.insert(myid);
   this->connections_mutex.unlock();
   std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl; 
   int sendbuf_len; 
