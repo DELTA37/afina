@@ -7,6 +7,11 @@
 #include <unordered_set>
 #include <pthread.h>
 #include <functional>
+#include <condition_variable>
+#include <mutex>
+#include <pthread.h>
+#include <unordered_set>
+
 #include <afina/network/Server.h>
 #include <protocol/Parser.h>
 namespace Afina {
@@ -69,6 +74,13 @@ private:
     // inside of accept_thread
     // Read-only
     uint32_t listen_port;
+
+    // Mutex used to access connections list
+    std::mutex connections_mutex;
+
+    // Conditional variable used to notify waiters about empty
+    // connections list
+    std::condition_variable connections_cv;
 
     // Threads that are processing connection data, permits
     // access only from inside of accept_thread
