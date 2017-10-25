@@ -27,12 +27,17 @@ namespace Blocking {
 
 void ServerImpl::cleanup_acceptor(void* args) {
   std::cout << __PRETTY_FUNCTION__ << "cleanup_acceptor" << std::endl;
-  int server_socket = *reinterpret_cast<int*>(args);
+  auto parsed = *reinterpret_cast<std::pair<ServerImpl*, int>*>(args);
+  int server_socket = parsed.second;
+  ServerImpl* serv = parsed.first;
+
   close(server_socket);
   // Wait until for all connections to be complete
-  std::unique_lock<std::mutex> __lock(connections_mutex);
-  while (!connections.empty()) {
-      connections_cv.wait(__lock);
+  {
+    std::unique_lock<std::mutex> __lock(serv->connections_mutex);
+    while (!serv->connections.empty()) {
+        serv->connections_cv.wait(__lock);
+    }
   }
 }
 
@@ -40,16 +45,22 @@ void ServerImpl::cleanup_connection(void* args) {
   std::cout << __PRETTY_FUNCTION__ << "cleanup_connection" << std::endl;
   std::tuple<ServerImpl*, pthread_t, int> arg_parse = *reinterpret_cast<std::tuple<ServerImpl*, pthread_t, int>*>(args);
   ServerImpl* serv = std::get<0>(arg_parse);
-  pthread_t myid = std::get<1>(arg_parse);
+  pthread_t self = std::get<1>(arg_parse);
   int client_socket = std::get<2>(arg_parse);
 
-  serv->connections_mutex.lock();
-  auto it = serv->connections.find(myid);
-  if (it != serv->connections.end()) {
-    serv->connections.erase(it);
-  }
-  serv->connections_mutex.unlock();
+  {
+    std::unique_lock<std::mutex> __lock(serv->connections_mutex);
+    auto pos = serv->connections.find(self);
 
+    assert(pos != serv->connections.end());
+    serv->connections.erase(pos);
+
+    if (serv->connections.empty()) {
+      // We are pretty sure that only ONE thread is waiting for connections
+      // queue to be empty - main thread
+      serv->connections_cv.notify_one();
+    }
+  }
   close(client_socket);
 }
 
@@ -139,15 +150,6 @@ void ServerImpl::Stop() {
 // See Server.h
 void ServerImpl::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    pthread_t myid = pthread_self();
-    this->connections_mutex.lock();
-    for (auto it = this->connections.begin(); it != this->connections.end(); ++it) {
-      if (pthread_equal(*it, myid)) {
-        this->connections.erase(it);
-        break;
-      }
-    }
-    this->connections_mutex.unlock();
     pthread_join(accept_thread, 0);
 }
 
@@ -237,31 +239,24 @@ void ServerImpl::RunAcceptor() {
           close(client_socket);
         }
     }
-    
-    this->connections_mutex.lock();
-    ServerImpl::PthreadSet cons(this->connections);
-    this->connections_mutex.unlock();
-    for (auto it = cons.begin(); it != cons.end(); ++it) {
-      void* ret;
-      pthread_join(*it, &ret);
-    }
-
     // Cleanup on exit...
-    pthread_cleanup_pop(0);
-    pthread_exit(NULL);
+    pthread_cleanup_pop(1);
 }
 
 // See Server.h
 void ServerImpl::RunConnection(int client_socket) { 
-  pthread_t myid = pthread_self();
+  std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
+  pthread_t self = pthread_self();
 
-  auto args = std::make_tuple(this, myid, client_socket);
+  // Thread just spawn, register itself as a connection
+  {
+    std::unique_lock<std::mutex> __lock(this->connections_mutex);
+    this->connections.insert(self);
+  }
+
+  auto args = std::make_tuple(this, self, client_socket);
   pthread_cleanup_push(ServerImpl::cleanup_connection, &args);
 
-  this->connections_mutex.lock();
-  this->connections.insert(myid);
-  this->connections_mutex.unlock();
-  std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl; 
   int sendbuf_len; 
   socklen_t sendbuf_type_size = sizeof(sendbuf_len);
   if (getsockopt(client_socket, SOL_SOCKET, SO_SNDBUF, &sendbuf_len, &sendbuf_type_size)) {
@@ -290,90 +285,53 @@ void ServerImpl::RunConnection(int client_socket) {
 
     command_buf += std::string(buf);
 
-    bool b = parser.Parse(command_buf.data(), s, parsed);
-    command_buf.erase(0, parsed);
+    try {
+      if (parser.Parse(command_buf.data(), s, parsed)) {
+        auto com = parser.Build(body_size);
 
-    if (b) {
-      auto com = parser.Build(body_size);
+        if (body_size > 0) {
+          std::cout << "network debug: " << "parsed command, " << std::endl 
+            << "body_size = " << body_size << std::endl
+            << "parsed = " << parsed << std::endl;
 
-      if (body_size > 0) {
-        std::cout << "network debug: " << "parsed command, " << std::endl 
-          << "body_size = " << body_size << std::endl
-          << "parsed = " << parsed << std::endl;
-
-        while(command_buf.size() < body_size) {
-          ssize_t t = recv(client_socket, buf, sendbuf_len, 0);
-          if (t < 0) {
-            close(client_socket);
-            throw std::runtime_error("Cannot read arguments, socket recv() failed");
+          while(command_buf.size() < body_size) {
+            ssize_t t = recv(client_socket, buf, sendbuf_len, 0);
+            if (t < 0) {
+              close(client_socket);
+              throw std::runtime_error("Cannot read arguments, socket recv() failed");
+            }
+            buf[t] = '\0';
+            command_buf += std::string(buf);
           }
-          buf[t] = '\0';
-          command_buf += std::string(buf);
-        }
 
-        std::cout << "network debug: " << "received arguments" << std::endl; 
-        std::string args;
-        std::copy(command_buf.begin(), command_buf.begin() + body_size, std::back_inserter(args));
-        command_buf.erase(0, body_size);
-        com->Execute(*this->pStorage, args, out);
-        if (send(client_socket, out.data(), out.size(), 0) <= 0) {
-          close(client_socket);
-          throw std::runtime_error("Socket send() failed");
+          std::string args;
+          std::copy(command_buf.begin(), command_buf.begin() + body_size, std::back_inserter(args));
+          command_buf.erase(0, body_size);
+          try {
+            com->Execute(*this->pStorage, args, out);
+          } catch (...) {
+            out = "Server Error";
+          }
+          if (send(client_socket, out.data(), out.size(), 0) <= 0) {
+            close(client_socket);
+            throw std::runtime_error("Socket send() failed");
+          }
+          std::cout << "network debug: " << "executed command and sent results" << std::endl; 
         }
-        std::cout << "network debug: " << "executed command and sent results" << std::endl; 
       }
-    }
+      command_buf.erase(0, parsed);
+    } catch (...) {
+      command_buf = "";
+      std::string out = "Server Error";
+      if (send(client_socket, out.data(), out.size(), 0) <= 0) {
+        close(client_socket);
+        throw std::runtime_error("Socket send() failed");
+      }
+    } 
   }
-  this->connections_mutex.lock();
-  for (auto it = this->connections.begin(); it != this->connections.end(); ++it) {
-    if (pthread_equal(*it, myid)) {
-      this->connections.erase(it);
-      break;
-    }
-  }
-  this->connections_mutex.unlock();
-  close(client_socket);
-  pthread_cleanup_pop(0);
-  pthread_exit(NULL);
-=======
-    close(server_socket);
-
-    // Wait until for all connections to be complete
-    std::unique_lock<std::mutex> __lock(connections_mutex);
-    while (!connections.empty()) {
-        connections_cv.wait(__lock);
-    }
+  pthread_cleanup_pop(1);
 }
 
-// See Server.h
-void ServerImpl::RunConnection() {
-    std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    pthread_t self = pthread_self();
-
-    // Thread just spawn, register itself as a connection
-    {
-        std::unique_lock<std::mutex> __lock(connections_mutex);
-        connections.insert(self);
-    }
-
-    // TODO: All connection work is here
-
-    // Thread is about to stop, remove self from list of connections
-    // and it was the very last one, notify main thread
-    {
-        std::unique_lock<std::mutex> __lock(connections_mutex);
-        auto pos = connections.find(self);
-
-        assert(pos != connections.end());
-        connections.erase(pos);
-
-        if (connections.empty()) {
-            // We are pretty sure that only ONE thread is waiting for connections
-            // queue to be empty - main thread
-            connections_cv.notify_one();
-        }
-    }
-}
 
 } // namespace Blocking
 } // namespace Network

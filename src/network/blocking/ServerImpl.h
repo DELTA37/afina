@@ -24,7 +24,7 @@ namespace Blocking {
  */
 
 struct PthreadEqual {
-  bool operator()(pthread_t t1, pthread_t t2) {
+  bool operator()(const pthread_t& t1, const pthread_t& t2) const {
     return pthread_equal(t1, t2);
   }
 };

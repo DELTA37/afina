@@ -1,6 +1,6 @@
 .idea
 generated/*
-
+*.swp
 # local cmake builds
 /build
 /cmake-build-debug
