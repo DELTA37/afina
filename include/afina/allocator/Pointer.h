@@ -14,10 +14,9 @@ struct FreeSpace {
 };
 
 class Pointer {
-public:
     FreeSpace* ptr; 
     void* base;
-
+public:
     Pointer();
     Pointer(void* base);
     Pointer(void* base, FreeSpace* _ptr);
@@ -29,6 +28,7 @@ public:
     Pointer &operator=(Pointer &&);
 
     void* get() const; 
+    friend class Simple;
 };
 
 } // namespace Allocator

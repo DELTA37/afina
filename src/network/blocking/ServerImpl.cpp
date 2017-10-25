@@ -39,11 +39,9 @@ void ServerImpl::cleanup_connection(void* args) {
   int client_socket = std::get<2>(arg_parse);
 
   serv->connections_mutex.lock();
-  for (auto it = serv->connections.begin(); it != serv->connections.end(); ++it) {
-    if (pthread_equal(*it, myid)) {
-      serv->connections.erase(it);
-      break;
-    }
+  auto it = serv->connections.find(myid);
+  if (it != serv->connections.end()) {
+    serv->connections.erase(it);
   }
   serv->connections_mutex.unlock();
 
@@ -130,23 +128,7 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
 // See Server.h
 void ServerImpl::Stop() {
   std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-
   running.store(false);
-  int n;
-  this->connections_mutex.lock();
-  n = this->connections.size();
-  this->connections_mutex.unlock();
-  while (n > 0) {
-    this->connections_mutex.lock();
-    pthread_t th = this->connections[n - 1];
-    this->connections_mutex.unlock();
-    pthread_join(th, NULL);
-    n--;
-  }
-  this->connections_mutex.unlock();
-
-  std::cout << "i am here" << std::endl;
-  pthread_cancel(this->accept_thread);
 }
 
 // See Server.h
@@ -253,9 +235,18 @@ void ServerImpl::RunAcceptor() {
           close(client_socket);
         }
     }
+    
+    this->connections_mutex.lock();
+    std::unordered_set<pthread_t, std::hash<pthread_t>, pthread_equal, std::allocator<pthread_t>> cons(this->connections);
+    this->connections_mutex.unlock();
+    for (auto it = cons.begin(); it != cons.end(); ++it) {
+      void* ret;
+      pthread_join(*it, &ret);
+    }
+
     // Cleanup on exit...
-    close(server_socket);
     pthread_cleanup_pop(0);
+    pthread_exit(NULL);
 }
 
 // See Server.h
@@ -339,9 +330,9 @@ void ServerImpl::RunConnection(int client_socket) {
     }
   }
   this->connections_mutex.unlock();
-  pthread_cleanup_pop(0);
-
   close(client_socket);
+  pthread_cleanup_pop(0);
+  pthread_exit(NULL);
 }
 
 } // namespace Blocking

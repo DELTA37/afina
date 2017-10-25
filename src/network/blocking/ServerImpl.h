@@ -4,8 +4,9 @@
 #include <atomic>
 #include <mutex>
 #include <vector>
+#include <unordered_set>
 #include <pthread.h>
-
+#include <functional>
 #include <afina/network/Server.h>
 #include <protocol/Parser.h>
 namespace Afina {
@@ -16,6 +17,9 @@ namespace Blocking {
  * # Network resource manager implementation
  * Server that is spawning a separate thread for each connection
  */
+
+std::function<bool(pthread_t, pthread_t)> equal = pthread_equal;
+
 class ServerImpl : public Server {
 public:
     ServerImpl(std::shared_ptr<Afina::Storage> ps);
@@ -68,7 +72,8 @@ private:
 
     // Threads that are processing connection data, permits
     // access only from inside of accept_thread
-    std::vector<pthread_t> connections;
+
+    std::unordered_set<pthread_t, std::hash<pthread_t>, equal> connections;
     std::mutex connections_mutex;
 
     std::vector<pthread_t> joined;

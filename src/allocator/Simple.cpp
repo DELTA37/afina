@@ -5,16 +5,12 @@
 #include "assert.h"
 #include <sstream>
 #include <utility>
+#include "stdlib.h"
+#include "unistd.h"
+#include "string.h"
 
 namespace Afina {
 namespace Allocator {
-
-static void cleanup(void* base, size_t N) {
-  char* mem = (char*)base;
-  for (size_t i = 0; i < N; i++) {
-    mem[i] = 0;
-  }
-}
 
 static inline void* add_diff(void* base, ptrdiff_t d) {
   return reinterpret_cast<void*>(reinterpret_cast<char*>(base) + d);
@@ -250,7 +246,7 @@ Simple::Simple(void *base, size_t size) {
   size_t new_size = (size / m) * m;
   this->base = base;
   this->size = new_size;
-  cleanup(this->base, this->size);
+  memset(this->base, 0, this->size);
   this->setBlock(base, this->size - m, 0);
   this->setBlock(add_diff(base, this->size - m), 1, 0);
   this->pointer_info_start = this->size - m;
