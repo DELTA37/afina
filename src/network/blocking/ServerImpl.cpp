@@ -260,7 +260,7 @@ void ServerImpl::RunConnection(int client_socket) {
   int sendbuf_len; 
   socklen_t sendbuf_type_size = sizeof(sendbuf_len);
   if (getsockopt(client_socket, SOL_SOCKET, SO_SNDBUF, &sendbuf_len, &sendbuf_type_size)) {
-    throw std::runtime_error("Socket getsockopt() failed");
+    pthread_exit(NULL);
   }
 
   char buf[sendbuf_len + 1];
@@ -275,7 +275,7 @@ void ServerImpl::RunConnection(int client_socket) {
 
     if ((s = recv(client_socket, buf, sendbuf_len, 0)) < 0) {
       close(client_socket);
-      throw std::runtime_error("Socket recv() failed");
+      pthread_exit(NULL);
     }
     if (s == 0) {
       break;
@@ -298,7 +298,7 @@ void ServerImpl::RunConnection(int client_socket) {
             ssize_t t = recv(client_socket, buf, sendbuf_len, 0);
             if (t < 0) {
               close(client_socket);
-              throw std::runtime_error("Cannot read arguments, socket recv() failed");
+              pthread_exit(NULL);
             }
             buf[t] = '\0';
             command_buf += std::string(buf);
@@ -314,7 +314,7 @@ void ServerImpl::RunConnection(int client_socket) {
           }
           if (send(client_socket, out.data(), out.size(), 0) <= 0) {
             close(client_socket);
-            throw std::runtime_error("Socket send() failed");
+            pthread_exit(NULL);
           }
           std::cout << "network debug: " << "executed command and sent results" << std::endl; 
         }
@@ -325,7 +325,7 @@ void ServerImpl::RunConnection(int client_socket) {
       std::string out = "Server Error";
       if (send(client_socket, out.data(), out.size(), 0) <= 0) {
         close(client_socket);
-        throw std::runtime_error("Socket send() failed");
+        pthread_exit(NULL);
       }
     } 
   }
