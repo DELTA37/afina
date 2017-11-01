@@ -3,6 +3,11 @@
 
 #include <memory>
 #include <pthread.h>
+#include <mutex>
+#include <atomic>
+#include <exception>
+#include "Utils.h"
+#include "unistd.h"
 
 namespace Afina {
 
@@ -21,6 +26,7 @@ class Worker {
 public:
     Worker(std::shared_ptr<Afina::Storage> ps);
     ~Worker();
+    Worker(const Worker& q) {this->ps = q.ps;}
 
     /**
      * Spaws new background thread that is doing epoll on the given server
@@ -47,10 +53,14 @@ protected:
     /**
      * Method executing by background thread
      */
-    void OnRun(void *args);
+    void OnRun(int server_socket);
+    static void* RunProxy(void* args);
+    static void cleanup_worker(void* args);
 
 private:
     pthread_t thread;
+    std::atomic<bool> running;
+    std::shared_ptr<Afina::Storage> ps;
 };
 
 } // namespace NonBlocking

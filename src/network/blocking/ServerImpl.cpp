@@ -241,6 +241,7 @@ void ServerImpl::RunAcceptor() {
     }
     // Cleanup on exit...
     pthread_cleanup_pop(1);
+    pthread_exit(NULL);
 }
 
 // See Server.h
@@ -303,33 +304,31 @@ void ServerImpl::RunConnection(int client_socket) {
             buf[t] = '\0';
             command_buf += std::string(buf);
           }
-
-          std::string args;
-          std::copy(command_buf.begin(), command_buf.begin() + body_size, std::back_inserter(args));
-          command_buf.erase(0, body_size);
-          try {
-            com->Execute(*this->pStorage, args, out);
-          } catch (...) {
-            out = "Server Error";
-          }
-          if (send(client_socket, out.data(), out.size(), 0) <= 0) {
-            close(client_socket);
-            pthread_exit(NULL);
-          }
-          std::cout << "network debug: " << "executed command and sent results" << std::endl; 
         }
+        std::string args;
+        std::copy(command_buf.begin(), command_buf.begin() + body_size, std::back_inserter(args));
+        command_buf.erase(0, body_size);
+        try {
+          com->Execute(*this->pStorage, args, out);
+        } catch (...) {
+          out = "Server Error";
+        }
+        if (send(client_socket, out.data(), out.size(), 0) <= 0) {
+          pthread_exit(NULL);
+        }
+        std::cout << "network debug: " << "executed command and sent results" << std::endl; 
       }
       command_buf.erase(0, parsed);
     } catch (...) {
       command_buf = "";
       std::string out = "Server Error";
       if (send(client_socket, out.data(), out.size(), 0) <= 0) {
-        close(client_socket);
         pthread_exit(NULL);
       }
     } 
   }
   pthread_cleanup_pop(1);
+  pthread_exit(NULL);
 }
 
 
