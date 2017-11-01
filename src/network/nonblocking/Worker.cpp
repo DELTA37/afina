@@ -9,6 +9,8 @@
 #include "Utils.h"
 #include <map>
 #include <memory>
+#include <afina/Executor.h>
+#include <afina/execute/Command.h>
 namespace Afina {
 namespace Network {
 namespace NonBlocking {
@@ -72,7 +74,7 @@ void Worker::OnRun(int server_socket) {
     // Do not forget to use EPOLLEXCLUSIVE flag when register socket
     // for events to avoid thundering herd type behavior.
     std::map<int, std::string> coms;
-    //std::map<int, std::shared_ptr<Execute::Command>> com;
+    std::map<int, std::unique_ptr<Execute::Command>> com;
     std::map<int, Protocol::Parser> parsers;
     std::map<int, int> body_sizes;
     int sendbuf_len = 1000;
@@ -141,7 +143,7 @@ void Worker::OnRun(int server_socket) {
                 std::copy(coms[sock].begin(), coms[sock].begin() + body_size, std::back_inserter(args));
                 coms[sock].erase(0, body_sizes[sock]);
                 try {
-                  //com[sock]->Execute(*(this->ps), args, out);
+                  com[sock]->Execute(*(this->ps), args, out);
                 } catch (...) {
                   out = "Server Error";
                 }
@@ -153,12 +155,12 @@ void Worker::OnRun(int server_socket) {
                   body_sizes.erase(sock);
                 }
                 body_sizes.erase(sock);
-                //com.erase(sock);
+                com.erase(sock);
               } else if (!parsers[sock].Parse(coms[sock].data(), s, parsed)) {
                 coms[sock].erase(0, parsed);
               } else {
-                //auto _com = parsers[sock].Build(body_size);
-                //com[sock] = std::make_shared<Afina::Execute::Command>(std::move(_com));
+                auto _com = parsers[sock].Build(body_size);
+                com.emplace(sock, std::move(_com));
                 body_sizes[sock] = body_size;
                 if (body_size > 0) {
                   coms[sock].erase(0, parsed);
@@ -168,7 +170,7 @@ void Worker::OnRun(int server_socket) {
                   std::copy(coms[sock].begin(), coms[sock].begin() + body_size, std::back_inserter(args));
                   coms[sock].erase(0, body_size);
                   try {
-                    //com[sock]->Execute(*(this->ps), args, out);
+                    com[sock]->Execute(*(this->ps), args, out);
                   } catch (...) {
                     out = "Server Error";
                   }
@@ -178,10 +180,10 @@ void Worker::OnRun(int server_socket) {
                     parsers.erase(sock);
                     coms.erase(sock);
                     body_sizes.erase(sock);
-                    //com.erase(sock);
+                    com.erase(sock);
                   }
                   body_sizes.erase(sock);
-                  //com.erase(sock);
+                  com.erase(sock);
                 }
               }
             }
