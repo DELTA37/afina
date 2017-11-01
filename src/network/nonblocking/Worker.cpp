@@ -72,7 +72,7 @@ void Worker::OnRun(int server_socket) {
     // Do not forget to use EPOLLEXCLUSIVE flag when register socket
     // for events to avoid thundering herd type behavior.
     std::map<int, std::string> coms;
-    std::map<int, std::shared_ptr<Execute::Command>> com;
+    //std::map<int, std::shared_ptr<Execute::Command>> com;
     std::map<int, Protocol::Parser> parsers;
     std::map<int, int> body_sizes;
     int sendbuf_len = 1000;
@@ -153,11 +153,11 @@ void Worker::OnRun(int server_socket) {
                   body_sizes.erase(sock);
                 }
                 body_sizes.erase(sock);
-                com.erase(sock);
+                //com.erase(sock);
               } else if (!parsers[sock].Parse(coms[sock].data(), s, parsed)) {
                 coms[sock].erase(0, parsed);
               } else {
-                auto _com = parsers[sock].Build(body_size);
+                //auto _com = parsers[sock].Build(body_size);
                 //com[sock] = std::make_shared<Afina::Execute::Command>(std::move(_com));
                 body_sizes[sock] = body_size;
                 if (body_size > 0) {
@@ -178,10 +178,10 @@ void Worker::OnRun(int server_socket) {
                     parsers.erase(sock);
                     coms.erase(sock);
                     body_sizes.erase(sock);
-                    com.erase(sock);
+                    //com.erase(sock);
                   }
                   body_sizes.erase(sock);
-                  com.erase(sock);
+                  //com.erase(sock);
                 }
               }
             }
