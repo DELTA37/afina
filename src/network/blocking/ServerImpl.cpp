@@ -27,9 +27,9 @@ namespace Blocking {
 
 void ServerImpl::cleanup_acceptor(void* args) {
   std::cout << __PRETTY_FUNCTION__ << "cleanup_acceptor" << std::endl;
-  auto parsed = *reinterpret_cast<std::pair<ServerImpl*, int>*>(args);
-  int server_socket = parsed.second;
-  ServerImpl* serv = parsed.first;
+  auto parsed = reinterpret_cast<std::pair<ServerImpl*, int>*>(args);
+  int server_socket = parsed->second;
+  ServerImpl* serv = parsed->first;
 
   close(server_socket);
   // Wait until for all connections to be complete
@@ -39,6 +39,7 @@ void ServerImpl::cleanup_acceptor(void* args) {
         serv->connections_cv.wait(__lock);
     }
   }
+  delete parsed;
 }
 
 void ServerImpl::cleanup_connection(void* args) {
@@ -84,6 +85,7 @@ void *ServerImpl::RunConnectionProxy(void *p) {
     } catch (std::runtime_error &ex) {
         std::cerr << "Server fails: " << ex.what() << std::endl;
     }
+    delete srv_pair;
     return 0;
 }
 
@@ -229,8 +231,8 @@ void ServerImpl::RunAcceptor() {
         if (this->connections.size() < this->max_workers) {
           this->connections_mutex.unlock();
           pthread_t client_thread;
-          auto srv_pair = std::make_pair(this, client_socket);
-          if (pthread_create(&client_thread, NULL, ServerImpl::RunConnectionProxy, &srv_pair) < 0) {
+          auto srv_pair = new std::pair<ServerImpl*, int>(this, client_socket);
+          if (pthread_create(&client_thread, NULL, ServerImpl::RunConnectionProxy, srv_pair) < 0) {
             throw std::runtime_error("Could not create client connection thread");
           }
         } else {
@@ -255,8 +257,8 @@ void ServerImpl::RunConnection(int client_socket) {
     this->connections.insert(self);
   }
 
-  auto args = std::make_tuple(this, self, client_socket);
-  pthread_cleanup_push(ServerImpl::cleanup_connection, &args);
+  auto args = new std::tuple<ServerImpl*, pthread_t, int>(this, self, client_socket);
+  pthread_cleanup_push(ServerImpl::cleanup_connection, args);
 
   int sendbuf_len; 
   socklen_t sendbuf_type_size = sizeof(sendbuf_len);
@@ -282,13 +284,14 @@ void ServerImpl::RunConnection(int client_socket) {
       break;
     }
     buf[s] = '\0';
-    std::cout << "network debug: " << "received command: " << std::string(buf) << std::endl;
+    //std::cout << "received command: " << std::string(buf) << std::endl;
 
     command_buf += std::string(buf);
 
     try {
       if (parser.Parse(command_buf.data(), s, parsed)) {
         auto com = parser.Build(body_size);
+        command_buf.erase(0, parsed);
 
         if (body_size > 0) {
           std::cout << "network debug: " << "parsed command, " << std::endl 
@@ -308,17 +311,17 @@ void ServerImpl::RunConnection(int client_socket) {
         std::string args;
         std::copy(command_buf.begin(), command_buf.begin() + body_size, std::back_inserter(args));
         command_buf.erase(0, body_size);
+        std::cout << "args:" << args << std::endl;
         try {
-          com->Execute(*this->pStorage, args, out);
+          com->Execute(*(this->pStorage), args, out);
         } catch (...) {
+          std::cout << "here";
           out = "Server Error";
         }
         if (send(client_socket, out.data(), out.size(), 0) <= 0) {
           pthread_exit(NULL);
         }
-        std::cout << "network debug: " << "executed command and sent results" << std::endl; 
       }
-      command_buf.erase(0, parsed);
     } catch (...) {
       command_buf = "";
       std::string out = "Server Error";

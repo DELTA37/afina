@@ -8,137 +8,99 @@ namespace Backend {
 
 // See MapBasedGlobalLockImpl.h
 bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &value) {
-
-  std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it = this->_backend.find(key);
-  if (it == this->_backend.end()) {
-    if (this->_now < this->_max_size) {
-      this->_now += 1;
-      this->_lock.lock();
-
-      this->_backend.insert(std::make_pair(key, std::make_tuple(value, this->_previous, std::string())));
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_pr = this->_backend.find(this->_previous);
-      if (it_pr != this->_backend.end()) {
-        std::get<2>(it_pr->second) = key;
-      } else {
-        this->_last = key;
-      }
-      this->_previous = key;
-
-      this->_lock.unlock();
-    } else {
-      this->_lock.lock();
-
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_last = this->_backend.find(this->_last);
-      this->_last = std::get<2>(it_last->second);
-      std::get<1>(it_last->second) = "";
-      this->_backend.erase(it);
-
-      this->_backend.insert(std::make_pair(key, std::make_tuple(value, this->_previous, std::string())));
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_pr = this->_backend.find(this->_previous);
-      std::get<2>(it_pr->second) = key;
-      this->_previous = key;
-
-      this->_lock.unlock();
-    }
-  }
-  else {
+  if (this->_now < this->_max_size) {
+    this->_now += 1;
     this->_lock.lock();
-    std::get<0>(it->second) = value;
-    std::string prev = std::get<1>(it->second);
-    std::string next = std::get<2>(it->second);
+    this->Insert(key, value);
+    this->_lock.unlock();
+  } else {
+    this->_lock.lock();
+    this->Erase(this->_last);
+    this->Insert(key, value);
+    this->_lock.unlock();
+  }
+  return true; 
+}
 
-    std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_pr = this->_backend.find(prev);
-    std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_ne = this->_backend.find(next);
-
-    if (it_pr != this->_backend.end()) {
-      std::get<2>(it_pr->second) = next;
+void MapBasedGlobalLockImpl::Insert(const std::string &key, const std::string &value) {
+  if (this->started) {
+    StorageMap::iterator it = this->_backend.find(key);
+    if (it == this->_backend.end()) {
+      this->_backend.insert(StoragePair(key, StorageValue(value, this->_previous, "")));
+    } else {
+      std::get<0>(it->second) = value;
     }
-    if (it_ne != this->_backend.end()) {
-      std::get<1>(it_ne->second) = prev;
+    StorageMap::iterator it_pr = this->_backend.find(this->_previous);
+    std::get<2>(it_pr->second) = key;
+  } else {
+    this->_backend.insert(StoragePair(key, StorageValue(value, "", "")));
+    this->_last = key;
+    this->_previous = key;
+    this->started = true;
+  }
+}
+
+void MapBasedGlobalLockImpl::Erase(const std::string &key) {
+  StorageMap::iterator it = this->_backend.find(key);
+  if (it != this->_backend.end()) {
+    if (key == this->_last) {
+      StorageMap::iterator it_last = this->_backend.find(key);
+      std::string next = std::get<2>(it_last->second);
+      StorageMap::iterator it_next = this->_backend.find(next);
+      if (it_next != this->_backend.end()) {
+        std::get<1>(it_next->second) = "";
+        this->_last = next;
+        this->_backend.erase(it);
+      } else {
+        this->_previous = "";
+        this->_last = "";
+        this->started = false;
+        this->_backend.erase(it);
+      }
+    } else if (key == this->_previous) {
+      StorageMap::iterator it_previous = this->_backend.find(key);
+      std::string previous_prev = std::get<1>(it_previous->second);
+      StorageMap::iterator it_previous_prev = this->_backend.find(previous_prev);
+      if (it_previous_prev != this->_backend.end()) {
+        std::get<2>(it_previous_prev->second) = "";
+        this->_previous = previous_prev;
+        this->_backend.erase(it);
+      } else {
+        this->_previous = "";
+        this->_last = "";
+        this->started = false;
+        this->_backend.erase(it);
+      }
+    } else {
+      std::string prev = std::get<1>(it->second);
+      std::string next = std::get<2>(it->second);
+      StorageMap::iterator it_prev = this->_backend.find(prev);
+      StorageMap::iterator it_next = this->_backend.find(next);
+      std::get<2>(it_prev->second) = next;
+      std::get<1>(it_next->second) = prev;
+      this->_backend.erase(it);
     }
   }
-
-  this->_lock.unlock();
-  return true; 
 }
 
 // See MapBasedGlobalLockImpl.h
 bool MapBasedGlobalLockImpl::PutIfAbsent(const std::string &key, const std::string &value) {
-  std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it = this->_backend.find(key);
+  StorageMap::iterator it = this->_backend.find(key);
   if (it == this->_backend.end()) {
-    if (this->_now < this->_max_size) {
-      this->_now += 1;
-      this->_lock.lock();
-
-      this->_backend.insert(std::make_pair(key, std::make_tuple(value, this->_previous, std::string())));
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_pr = this->_backend.find(this->_previous);
-      std::get<2>(it_pr->second) = key;
-      this->_previous = key;
-
-      this->_lock.unlock();
-    } else {
-      this->_lock.lock();
-
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it = this->_backend.find(this->_last);
-      this->_last = std::get<2>(it->second);
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_last = this->_backend.find(this->_last);
-      std::get<1>(it_last->second) = "";
-      this->_backend.erase(it);
-
-      this->_backend.insert(std::make_pair(key, std::make_tuple(value, this->_previous, std::string())));
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_pr = this->_backend.find(this->_previous);
-      std::get<2>(it_pr->second) = key;
-      this->_previous = key;
-
-      std::string prev = std::get<1>(it->second);
-      std::string next = std::get<2>(it->second);
-
-      it_pr = this->_backend.find(prev);
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_ne = this->_backend.find(next);
-
-      if (it_pr != this->_backend.end()) {
-        std::get<2>(it_pr->second) = next;
-      }
-      if (it_ne != this->_backend.end()) {
-        std::get<1>(it_ne->second) = prev;
-      }
-
-    
-      this->_lock.unlock();
-    }
-
+    this->Put(key, value);
+  } else {
+    return false;
   }
-
   return true; 
 }
 
 // See MapBasedGlobalLockImpl.h
 bool MapBasedGlobalLockImpl::Set(const std::string &key, const std::string &value) { 
-  std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it = this->_backend.find(key);
+  StorageMap::iterator it = this->_backend.find(key);
   if (it != this->_backend.end()) {
-    if (this->_now < this->_max_size) {
-      this->_now += 1;
-      this->_lock.lock();
-      std::get<0>(it->second) = value;
-      this->_lock.unlock();
-
-      std::string prev = std::get<1>(it->second);
-      std::string next = std::get<2>(it->second);
-
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_pr = this->_backend.find(prev);
-      std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_ne = this->_backend.find(next);
-
-      if (it_pr != this->_backend.end()) {
-        std::get<2>(it_pr->second) = next;
-      }
-      if (it_ne != this->_backend.end()) {
-        std::get<1>(it_ne->second) = prev;
-      }
-
-
-    } else {
-      return false;
-    }
+    this->Put(key, value);
+  } else {
+    return false;
   }
 
   return true; 
@@ -146,31 +108,15 @@ bool MapBasedGlobalLockImpl::Set(const std::string &key, const std::string &valu
 
 // See MapBasedGlobalLockImpl.h
 bool MapBasedGlobalLockImpl::Delete(const std::string &key) { 
-  std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it = this->_backend.find(key);
-  if (it == this->_backend.end()) {
-    return false;
-  }
   this->_lock.lock();
-  
-  std::string next = std::get<2>(it->second);
-  std::string prev = std::get<1>(it->second);
-
-  std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_pr = this->_backend.find(prev);
-  std::get<2>(it_pr->second) = next;
-
-  std::map<std::string, std::tuple<std::string, std::string, std::string>>::iterator it_ne = this->_backend.find(next);
-  std::get<1>(it_ne->second) = prev;
-
-  this->_backend.erase(it);
-  this->_now -= 1;
-
+  this->Erase(key);
   this->_lock.unlock();
   return true; 
 }
 
 // See MapBasedGlobalLockImpl.h
 bool MapBasedGlobalLockImpl::Get(const std::string &key, std::string &value) const { 
-  std::map<std::string, std::tuple<std::string, std::string, std::string>>::const_iterator it = this->_backend.find(key);
+  StorageMap::const_iterator it = this->_backend.find(key);
   if (it == this->_backend.end()) {
     return false; 
   } else {

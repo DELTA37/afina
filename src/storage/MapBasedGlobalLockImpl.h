@@ -17,7 +17,7 @@ namespace Backend {
  */
 class MapBasedGlobalLockImpl : public Afina::Storage {
 public:
-    MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size), _now(0), _last(""), _previous("") {}
+    MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size), _now(0), _last(""), _previous(""), started(false) {}
     ~MapBasedGlobalLockImpl() {}
 
     // Implements Afina::Storage interface
@@ -36,12 +36,19 @@ public:
     bool Get(const std::string &key, std::string &value) const override;
 
 private:
+    void Insert(const std::string &key, const std::string &value);
+    void Erase(const std::string &key);
+    typedef std::map<std::string, std::tuple<std::string, std::string, std::string>> StorageMap;
+    typedef std::tuple<std::string, std::string, std::string> StorageValue;
+    typedef std::pair<std::string, std::tuple<std::string, std::string, std::string>> StoragePair;
+
     std::mutex _lock;
 
     size_t _max_size;
     size_t _now;
 
-    std::map<std::string, std::tuple<std::string, std::string, std::string>> _backend;
+    StorageMap _backend;
+    bool started;
     std::string _last;
     std::string _previous;
 };
