@@ -16,7 +16,7 @@ namespace Network {
 namespace NonBlocking {
 
 #define MAXEVENTS (100)
-
+#define SENDBUFLEN (1000)
 // See Worker.h
 Worker::Worker(std::shared_ptr<Afina::Storage> _ps) : ps(_ps) {}
 
@@ -29,13 +29,14 @@ void* Worker::RunProxy(void* _args) {
   int server_socket = args->second;
   worker_instance->OnRun(server_socket);
   return NULL;
+  delete args;
 }
 
 // See Worker.h
 void Worker::Start(int server_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    auto args = std::make_pair(this, server_socket);
-    if (pthread_create(&thread, NULL, Worker::RunProxy, &args) != 0) {
+    auto args = new std::pair<Worker*, int>(this, server_socket);
+    if (pthread_create(&thread, NULL, Worker::RunProxy, args) != 0) {
       throw std::runtime_error("cannot create a thread");
     }
 }
@@ -53,10 +54,11 @@ void Worker::Join() {
 }
 
 void Worker::cleanup_worker(void* _args) {
-  auto args = *(reinterpret_cast<std::tuple<Worker*, int>*>(_args));
-  Worker* worker_instance = std::get<0>(args);
-  int epfd = std::get<1>(args);
+  auto args = reinterpret_cast<std::tuple<Worker*, int>*>(_args);
+  Worker* worker_instance = std::get<0>(*args);
+  int epfd = std::get<1>(*args);
   close(epfd);
+  delete args;
 }
 
 // See Worker.h
@@ -73,12 +75,13 @@ void Worker::OnRun(int server_socket) {
     //
     // Do not forget to use EPOLLEXCLUSIVE flag when register socket
     // for events to avoid thundering herd type behavior.
-    std::map<int, std::string> coms;
+    std::map<int, std::string> text;
     std::map<int, std::unique_ptr<Execute::Command>> com;
-    std::map<int, Protocol::Parser> parsers;
-    std::map<int, int> body_sizes;
-    int sendbuf_len = 1000;
-    int epfd = epoll_create(2);
+    std::map<int, Protocol::Parser> parser;
+    std::map<int, uint32_t> body_size;
+
+    int sendbuf_len = SENDBUFLEN;
+    int epfd = epoll_create(MAXEVENTS);
     if (epfd == -1) {
       throw std::runtime_error("cannot epoll_create");
     }
@@ -92,108 +95,126 @@ void Worker::OnRun(int server_socket) {
       throw std::runtime_error("cannot epoll_ctl");
     }
 
-    auto args = std::make_tuple(this, server_socket);
-    pthread_cleanup_push(Worker::cleanup_worker, &args);
+    auto args = new std::tuple<Worker*, int>(this, server_socket);
+    pthread_cleanup_push(Worker::cleanup_worker, args);
      
     while(running.load()) {
+      std::cout << "start wait" << std::endl;
       int n = epoll_wait(epfd, events, MAXEVENTS, -1);
+      std::cout << "end wait" << std::endl;
       if (n == -1) {
         throw std::runtime_error("cannot epoll_wait");
       }
       for (int i = 0; i < n; i++) {
         if (events[i].data.fd == server_socket) {
-          if (events[i].events & EPOLLIN) {
+          if ((events[i].events & EPOLLIN) == EPOLLIN) {
             int sock = accept(server_socket, NULL, NULL);
             make_socket_non_blocking(sock);
-            ev.events = EPOLLIN | EPOLLERR;
+            //ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
+            ev.events = EPOLLIN | EPOLLHUP;
             ev.data.fd = sock;
             if (epoll_ctl(epfd, EPOLL_CTL_ADD, sock, &ev) == -1) {
               throw std::runtime_error("cannot epoll_ctl");
             }
-          } else if ((events[i].events & EPOLLERR) && (events[i].events & EPOLLHUP))  {
+            parser.emplace(sock, Protocol::Parser());
+          } else if (((events[i].events & EPOLLERR) == EPOLLERR) && ((events[i].events & EPOLLHUP) == EPOLLHUP))  {
             pthread_exit(NULL);
           }
         } else {
           int sock = events[i].data.fd;
-          if (events[i].events & EPOLLERR == EPOLLERR) {
-            epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
-            close(sock);
-            parsers.erase(sock);
-            coms.erase(sock);
-            body_sizes.erase(sock);
-          } else if (events[i].events & EPOLLIN == EPOLLIN) {
-            char buf[sendbuf_len + 1];
+          if ((events[i].events & EPOLLIN) == EPOLLIN) {
+            size_t sendbuf_len = 100;
             ssize_t s;
-            size_t parsed; 
-            uint32_t body_size;
-            std::string out("");
-
+            char buf[sendbuf_len + 1];
+            
             if ((s = recv(sock, buf, sendbuf_len, 0)) < 0) {
               epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
               close(sock);
-              parsers.erase(sock);
-              coms.erase(sock);
-              body_sizes.erase(sock);
+              parser.erase(sock);
+              com.erase(sock);
+              body_size.erase(sock);
+              text.erase(sock);
             } else {
               buf[s] = '\0';
-              auto diff = std::string(buf);
-              coms[sock] += diff;
-              if (body_sizes.count(sock) && (diff.length() >= body_sizes[sock])) {
-                std::string args;
-                std::copy(coms[sock].begin(), coms[sock].begin() + body_size, std::back_inserter(args));
-                coms[sock].erase(0, body_sizes[sock]);
-                try {
-                  com[sock]->Execute(*(this->ps), args, out);
-                } catch (...) {
-                  out = "Server Error";
-                }
-                if (send(sock, out.data(), out.size(), 0) <= 0) {
-                  epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
-                  close(sock);
-                  parsers.erase(sock);
-                  coms.erase(sock);
-                  body_sizes.erase(sock);
-                }
-                body_sizes.erase(sock);
-                com.erase(sock);
-              } else if (!parsers[sock].Parse(coms[sock].data(), s, parsed)) {
-                coms[sock].erase(0, parsed);
-              } else {
-                auto _com = parsers[sock].Build(body_size);
-                com.emplace(sock, std::move(_com));
-                body_sizes[sock] = body_size;
-                if (body_size > 0) {
-                  coms[sock].erase(0, parsed);
-                  body_sizes[sock] = body_size;
-                } else {
-                  std::string args;
-                  std::copy(coms[sock].begin(), coms[sock].begin() + body_size, std::back_inserter(args));
-                  coms[sock].erase(0, body_size);
+              std::string diff = std::string(buf);
+              text[sock] += diff;
+              
+              bool waiting = false;
+
+              while((text[sock].length() > 2) && (not waiting)) {
+                if (body_size.find(sock) == body_size.end()) {
+                  size_t parsed_len;
                   try {
-                    com[sock]->Execute(*(this->ps), args, out);
-                  } catch (...) {
-                    out = "Server Error";
+                    if (!parser[sock].Parse(text[sock].data(), text[sock].length(), parsed_len)) {
+                      text[sock].erase(0, parsed_len);
+                    } else {
+                      text[sock].erase(0, parsed_len);
+                      uint32_t _body_size;
+                      auto _com = parser[sock].Build(_body_size);
+                      com.emplace(sock, std::move(_com));
+                      body_size.emplace(sock, _body_size);
+                    }
+                  } catch(...) {
+                    std::string out = "Server Error";
+                    if (send(sock, out.data(), out.size(), 0) <= 0) {
+                      epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
+                      close(sock);
+                      parser.erase(sock);
+                      com.erase(sock);
+                      body_size.erase(sock);
+                      text.erase(sock);
+                      break;
+                    }
+                    text[sock] = "";
                   }
-                  if (send(sock, out.data(), out.size(), 0) <= 0) {
-                    epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
-                    close(sock);
-                    parsers.erase(sock);
-                    coms.erase(sock);
-                    body_sizes.erase(sock);
-                    com.erase(sock);
-                  }
-                  body_sizes.erase(sock);
-                  com.erase(sock);
                 }
-              }
-            }
+
+                if (body_size.find(sock) != body_size.end()) {
+                  if (text[sock].length() >= body_size[sock]) {
+                    std::string out; 
+                    std::string args;
+                    std::copy(text[sock].begin(), text[sock].begin() + body_size[sock], std::back_inserter(args));
+                    text[sock].erase(0, body_size[sock]);
+
+                    try {
+                      com[sock]->Execute(*(this->ps), args, out);
+                    } catch (...) {
+                      out = "Server Error";
+                    }
+
+                    if (send(sock, out.data(), out.size(), 0) <= 0) {
+                      epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
+                      close(sock);
+                      parser.erase(sock);
+                      com.erase(sock);
+                      body_size.erase(sock);
+                      text.erase(sock);
+                      break;
+                    }
+                    body_size.erase(sock);
+                    com.erase(sock);
+                    waiting = false;
+                  } else {
+                    waiting = true;
+                  }
+                }
+              } // while(processing client)
+            } // recv
+          } else {
+            std::cout << "here" << std::endl;
+            epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
+            close(sock);
+            parser.erase(sock);
+            text.erase(sock);
+            com.erase(sock);
+            body_size.erase(sock);
           }
-        }
-      }
-    }
+        } // client socket
+      } // for (events)
+    } // while(running)
     pthread_cleanup_pop(1);
     pthread_exit(NULL);
-}
+} // fundtion
 
 } // namespace NonBlocking
 } // namespace Network

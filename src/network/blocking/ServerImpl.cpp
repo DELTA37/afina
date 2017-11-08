@@ -26,7 +26,6 @@ namespace Blocking {
 
 
 void ServerImpl::cleanup_acceptor(void* args) {
-  std::cout << __PRETTY_FUNCTION__ << "cleanup_acceptor" << std::endl;
   auto parsed = reinterpret_cast<std::pair<ServerImpl*, int>*>(args);
   int server_socket = parsed->second;
   ServerImpl* serv = parsed->first;
@@ -43,11 +42,10 @@ void ServerImpl::cleanup_acceptor(void* args) {
 }
 
 void ServerImpl::cleanup_connection(void* args) {
-  std::cout << __PRETTY_FUNCTION__ << "cleanup_connection" << std::endl;
-  std::tuple<ServerImpl*, pthread_t, int> arg_parse = *reinterpret_cast<std::tuple<ServerImpl*, pthread_t, int>*>(args);
-  ServerImpl* serv = std::get<0>(arg_parse);
-  pthread_t self = std::get<1>(arg_parse);
-  int client_socket = std::get<2>(arg_parse);
+  auto arg_parse = reinterpret_cast<std::tuple<ServerImpl*, pthread_t, int>*>(args);
+  ServerImpl* serv = std::get<0>(*arg_parse);
+  pthread_t self = std::get<1>(*arg_parse);
+  int client_socket = std::get<2>(*arg_parse);
 
   {
     std::unique_lock<std::mutex> __lock(serv->connections_mutex);
@@ -63,6 +61,7 @@ void ServerImpl::cleanup_connection(void* args) {
     }
   }
   close(client_socket);
+  delete arg_parse;
 }
 
 
@@ -184,8 +183,8 @@ void ServerImpl::RunAcceptor() {
         throw std::runtime_error("Failed to open socket");
     }
 
-    auto args = std::make_tuple();
-    pthread_cleanup_push(ServerImpl::cleanup_acceptor, this);
+    auto args = new std::tuple<ServerImpl*, int>(this, server_socket);
+    pthread_cleanup_push(ServerImpl::cleanup_acceptor, args);
     // when the server closes the socket,the connection must stay in the TIME_WAIT state to
     // make sure the client received the acknowledgement that the connection has been terminated.
     // During this time, this port is unavailable to other processes, unless we specify this option
@@ -284,19 +283,24 @@ void ServerImpl::RunConnection(int client_socket) {
       break;
     }
     buf[s] = '\0';
-    //std::cout << "received command: " << std::string(buf) << std::endl;
-
     command_buf += std::string(buf);
 
-    try {
-      if (parser.Parse(command_buf.data(), s, parsed)) {
+    while(command_buf.length() > 2) {
+      bool parser_bool = false;
+      try {
+        parser_bool = parser.Parse(command_buf.data(), command_buf.length(), parsed);
+      } catch (...) {
+        std::string out = "Server Error";
+        if (send(client_socket, out.data(), out.size(), 0) <= 0) {
+          pthread_exit(NULL);
+        }
+        command_buf = "";
+      }
+      if (parser_bool) {
         auto com = parser.Build(body_size);
         command_buf.erase(0, parsed);
 
         if (body_size > 0) {
-          std::cout << "network debug: " << "parsed command, " << std::endl 
-            << "body_size = " << body_size << std::endl
-            << "parsed = " << parsed << std::endl;
 
           while(command_buf.size() < body_size) {
             ssize_t t = recv(client_socket, buf, sendbuf_len, 0);
@@ -311,7 +315,6 @@ void ServerImpl::RunConnection(int client_socket) {
         std::string args;
         std::copy(command_buf.begin(), command_buf.begin() + body_size, std::back_inserter(args));
         command_buf.erase(0, body_size);
-        std::cout << "args:" << args << std::endl;
         try {
           com->Execute(*(this->pStorage), args, out);
         } catch (...) {
@@ -322,13 +325,7 @@ void ServerImpl::RunConnection(int client_socket) {
           pthread_exit(NULL);
         }
       }
-    } catch (...) {
-      command_buf = "";
-      std::string out = "Server Error";
-      if (send(client_socket, out.data(), out.size(), 0) <= 0) {
-        pthread_exit(NULL);
-      }
-    } 
+    }
   }
   pthread_cleanup_pop(1);
   pthread_exit(NULL);
