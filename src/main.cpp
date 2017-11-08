@@ -32,7 +32,7 @@ void signal_handler(uv_signal_t *handle, int signum) {
 // Called when it is time to collect passive metrics from services
 void timer_handler(uv_timer_t *handle) {
     Application *pApp = static_cast<Application *>(handle->data);
-    std::cout << "Start passive metrics collection" << std::endl;
+    //std::cout << "Start passive metrics collection" << std::endl;
 }
 
 int main(int argc, char **argv) {

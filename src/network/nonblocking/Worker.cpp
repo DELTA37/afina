@@ -78,6 +78,7 @@ void Worker::OnRun(int server_socket) {
     std::map<int, std::string> text;
     std::map<int, std::unique_ptr<Execute::Command>> com;
     std::map<int, Protocol::Parser> parser;
+    std::map<int, size_t> parsed;
     std::map<int, uint32_t> body_size;
 
     int sendbuf_len = SENDBUFLEN;
@@ -105,70 +106,81 @@ void Worker::OnRun(int server_socket) {
       if (n == -1) {
         throw std::runtime_error("cannot epoll_wait");
       }
+      std::cout << n << std::endl;
       for (int i = 0; i < n; i++) {
         if (events[i].data.fd == server_socket) {
           if ((events[i].events & EPOLLIN) == EPOLLIN) {
             int sock = accept(server_socket, NULL, NULL);
             make_socket_non_blocking(sock);
-            //ev.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-            ev.events = EPOLLIN | EPOLLHUP;
+            ev.events = EPOLLIN | EPOLLHUP | EPOLLRDHUP | EPOLLERR;
             ev.data.fd = sock;
             if (epoll_ctl(epfd, EPOLL_CTL_ADD, sock, &ev) == -1) {
               throw std::runtime_error("cannot epoll_ctl");
             }
-            parser.emplace(sock, Protocol::Parser());
+            parsed.emplace(sock, 0);
+            parser.insert(std::make_pair(sock, Protocol::Parser()));
+            text.insert(std::make_pair(sock, ""));
           } else if (((events[i].events & EPOLLERR) == EPOLLERR) && ((events[i].events & EPOLLHUP) == EPOLLHUP))  {
             pthread_exit(NULL);
           }
         } else {
           int sock = events[i].data.fd;
           if ((events[i].events & EPOLLIN) == EPOLLIN) {
-            size_t sendbuf_len = 100;
+            std::cout << "reading" << std::endl;
+            size_t sendbuf_len = SENDBUFLEN;
             ssize_t s;
             char buf[sendbuf_len + 1];
             
-            if ((s = recv(sock, buf, sendbuf_len, 0)) < 0) {
-              epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
+            if ((s = recv(sock, buf, sendbuf_len, 0)) <= 0) {
+              if (epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL) == -1) {
+                throw std::runtime_error("cannot epoll_ctl");
+              }
+              std::cout << "closing" << std::endl;
               close(sock);
               parser.erase(sock);
+              parsed.erase(sock);
               com.erase(sock);
               body_size.erase(sock);
               text.erase(sock);
             } else {
+              std::cout << "processing" << std::endl;
               buf[s] = '\0';
               std::string diff = std::string(buf);
-              text[sock] += diff;
-              
+              text[sock] += std::string(buf);
+              std::cout << text[sock].length() << " command buf: " << text[sock] << std::endl;
               bool waiting = false;
-
               while((text[sock].length() > 2) && (not waiting)) {
+                //// 1 stage
                 if (body_size.find(sock) == body_size.end()) {
-                  size_t parsed_len;
                   try {
-                    if (!parser[sock].Parse(text[sock].data(), text[sock].length(), parsed_len)) {
-                      text[sock].erase(0, parsed_len);
+                    if (!parser[sock].Parse(text[sock].data(), text[sock].length(), parsed[sock])) {
+                      std::cout << "no parsing" << std::endl;
                     } else {
-                      text[sock].erase(0, parsed_len);
+                      text[sock].erase(0, parsed[sock]);
+                      parsed[sock] = 0;
+                      std::cout << "parsing" << std::endl;
                       uint32_t _body_size;
                       auto _com = parser[sock].Build(_body_size);
                       com.emplace(sock, std::move(_com));
                       body_size.emplace(sock, _body_size);
                     }
                   } catch(...) {
+                    std::cout << "parser error" << std::endl;
                     std::string out = "Server Error";
                     if (send(sock, out.data(), out.size(), 0) <= 0) {
                       epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
                       close(sock);
                       parser.erase(sock);
+                      parsed.erase(sock);
                       com.erase(sock);
                       body_size.erase(sock);
                       text.erase(sock);
                       break;
                     }
-                    text[sock] = "";
+                    text[sock] = "\r\n";
                   }
                 }
-
+                //// 2 stage
                 if (body_size.find(sock) != body_size.end()) {
                   if (text[sock].length() >= body_size[sock]) {
                     std::string out; 
@@ -186,6 +198,7 @@ void Worker::OnRun(int server_socket) {
                       epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
                       close(sock);
                       parser.erase(sock);
+                      parsed.erase(sock);
                       com.erase(sock);
                       body_size.erase(sock);
                       text.erase(sock);
@@ -201,10 +214,11 @@ void Worker::OnRun(int server_socket) {
               } // while(processing client)
             } // recv
           } else {
-            std::cout << "here" << std::endl;
+            std::cout << "error" << std::endl;
             epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
             close(sock);
             parser.erase(sock);
+            parsed.erase(sock);
             text.erase(sock);
             com.erase(sock);
             body_size.erase(sock);

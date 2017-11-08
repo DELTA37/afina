@@ -268,7 +268,7 @@ void ServerImpl::RunConnection(int client_socket) {
   char buf[sendbuf_len + 1];
   std::string command_buf;
   ssize_t s;
-  size_t parsed; 
+  size_t parsed = 0; 
   Protocol::Parser parser;
   uint32_t body_size;
   
@@ -288,7 +288,7 @@ void ServerImpl::RunConnection(int client_socket) {
     while(command_buf.length() > 2) {
       bool parser_bool = false;
       try {
-        parser_bool = parser.Parse(command_buf.data(), command_buf.length(), parsed);
+        parser_bool = parser.Parse(command_buf.data(), s, parsed);
       } catch (...) {
         std::string out = "Server Error";
         if (send(client_socket, out.data(), out.size(), 0) <= 0) {
