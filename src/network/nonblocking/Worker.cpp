@@ -22,6 +22,7 @@ void* Worker::RunProxy(void* _args) {
 // See Worker.h
 void Worker::Start(int server_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
+    this->running.store(true);
     auto args = new std::pair<Worker*, int>(this, server_socket);
     if (pthread_create(&thread, NULL, Worker::RunProxy, args) != 0) {
       throw std::runtime_error("cannot create a thread");
@@ -31,7 +32,7 @@ void Worker::Start(int server_socket) {
 // See Worker.h
 void Worker::Stop() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    running.store(false);
+    this->running.store(false);
 }
 
 // See Worker.h
@@ -44,7 +45,6 @@ void Worker::Join() {
 // See Worker.h
 void Worker::OnRun(int server_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-
     // TODO: implementation here
     // 1. Create epoll_context here
     // 2. Add server_socket to context
@@ -55,15 +55,21 @@ void Worker::OnRun(int server_socket) {
     //
     // Do not forget to use EPOLLEXCLUSIVE flag when register socket
     // for events to avoid thundering herd type behavior.
-    EpollManager manager(this->ps, server_socket);
-    while(running.load()) {
-      try {
-        manager.processEvent();
-      } catch(std::exception& e) {
-        std::cout << e.what() << std::endl;
-        pthread_exit(NULL);
-      }
-    } // while(running)
+    try {
+      EpollManager manager(this->ps, this, server_socket);
+      std::cout << std::boolalpha << this->running.load() << std::endl;
+      while(running.load()) {
+        try {
+          manager.processEvent();
+        } catch(std::exception& e) {
+          std::cout << e.what() << std::endl;
+          pthread_exit(NULL);
+        }
+      } // while(running)
+
+    } catch (std::exception& e) {
+      std::cout << e.what() << std::endl;
+    }
 } // fundtion
 
 } // namespace NonBlocking

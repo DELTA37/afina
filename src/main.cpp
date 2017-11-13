@@ -13,8 +13,12 @@
 #include "network/nonblocking/ServerImpl.h"
 #include "network/uv/ServerImpl.h"
 #include "storage/MapBasedGlobalLockImpl.h"
+#include <signal.h>
 #include <unistd.h>
 #include <string.h>
+
+#include <signalfd.h>
+#include <timerfd.h>
 
 typedef struct {
     std::shared_ptr<Afina::Storage> storage;
@@ -132,48 +136,91 @@ int main(int argc, char **argv) {
 
     if (network_type == "uv") {
         app.server = std::make_shared<Afina::Network::UV::ServerImpl>(app.storage);
+        // Init local loop. It will react to signals and performs some metrics collections. Each
+        // subsystem is able to push metrics actively, but some metrics could be collected only
+        // by polling, so loop here will does that work
+        uv_loop_t loop;
+        uv_loop_init(&loop);
+
+        uv_signal_t sig;
+        uv_signal_init(&loop, &sig);
+        uv_signal_start(&sig, signal_handler, SIGTERM | SIGKILL);
+        sig.data = &app;
+
+        uv_timer_t timer;
+        uv_timer_init(&loop, &timer);
+        timer.data = &app;
+        uv_timer_start(&timer, timer_handler, 0, 5000);
+
+        // Start services
+        try {
+            app.storage->Start();
+            app.server->Start(8080);
+
+            // Freeze current thread and process events
+            std::cout << "Application started" << std::endl;
+            uv_run(&loop, UV_RUN_DEFAULT);
+
+            // Stop services
+            app.server->Stop();
+            app.server->Join();
+            app.storage->Stop();
+
+            std::cout << "Application stopped" << std::endl;
+        } catch (std::exception &e) {
+            std::cerr << "Fatal error" << e.what() << std::endl;
+        }
+
     } else if (network_type == "blocking") {
         app.server = std::make_shared<Afina::Network::Blocking::ServerImpl>(app.storage);
     } else if (network_type == "nonblocking") {
         app.server = std::make_shared<Afina::Network::NonBlocking::ServerImpl>(app.storage);
+
+        int epfd = epoll_create(2);
+
+        sigset_t mask;
+        sigemptyset(&mask);
+        sigaddset(&mask, SIGINT);
+        sigaddset(&mask, SIGTERM);
+        int sigfd = signalfd(-1, &mask, SFD_NONBLOCK);
+
+        int timer = timerfd_create(CLOCK_REALTIME, 0);
+
+        epoll_event sigev;
+        sigev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
+        sigev.data.fd = sigfd;
+
+        epoll_event timerev;
+        timerev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
+        timerev.data.fd = timer;
+
+        if (epoll_ctl(epfd, EPOLL_CTL_ADD, sigfd, &sigev) == -1) {
+          std::cerr << "Fatal error: epoll_ctl" << std::endl;
+          return 1;
+        }
+
+        if (epoll_ctl(epfd, EPOLL_CTL_ADD, timerfd, &timerev) == -1) {
+          std::cerr << "Fatal error: epoll_ctl" << std::endl;
+          return 1;
+        }
+
+        try {
+          app.storage->Start();
+          app.server->Start(8080, 3);
+          while(1) {
+            
+          }
+        } catch(std::exception& e) {
+            std::cerr << "Fatal error" << e.what() << std::endl;
+            return 1;
+        }
+
+        std::cout << "Application started" << std::endl;
+
     } else {
         throw std::runtime_error("Unknown network type");
     }
 
-    // Init local loop. It will react to signals and performs some metrics collections. Each
-    // subsystem is able to push metrics actively, but some metrics could be collected only
-    // by polling, so loop here will does that work
-    uv_loop_t loop;
-    uv_loop_init(&loop);
-
-    uv_signal_t sig;
-    uv_signal_init(&loop, &sig);
-    uv_signal_start(&sig, signal_handler, SIGTERM | SIGKILL);
-    sig.data = &app;
-
-    uv_timer_t timer;
-    uv_timer_init(&loop, &timer);
-    timer.data = &app;
-    uv_timer_start(&timer, timer_handler, 0, 5000);
-
-    // Start services
-    try {
-        app.storage->Start();
-        app.server->Start(8080);
-
-        // Freeze current thread and process events
-        std::cout << "Application started" << std::endl;
-        uv_run(&loop, UV_RUN_DEFAULT);
-
-        // Stop services
-        app.server->Stop();
-        app.server->Join();
-        app.storage->Stop();
-
-        std::cout << "Application stopped" << std::endl;
-    } catch (std::exception &e) {
-        std::cerr << "Fatal error" << e.what() << std::endl;
-    }
 
     return 0;
 }

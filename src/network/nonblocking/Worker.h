@@ -1,6 +1,7 @@
 #ifndef AFINA_NETWORK_NONBLOCKING_WORKER_H
 #define AFINA_NETWORK_NONBLOCKING_WORKER_H
 
+#include <sys/signalfd.h>
 #include <memory>
 #include <pthread.h>
 #include <mutex>
@@ -16,6 +17,8 @@
 #include <sys/types.h>
 #include <protocol/Parser.h>
 #include "Utils.h"
+#include <signal.h>
+#include <assert.h>
 #include <map>
 #include <memory>
 #include <afina/Executor.h>
@@ -31,6 +34,53 @@ class Storage;
 
 namespace Network {
 namespace NonBlocking {
+
+
+/**
+ * # Thread running epoll
+ * On Start spaws background thread that is doing epoll on the given server
+ * socket and process incoming connections and its data
+ */
+class Worker {
+public:
+    Worker(std::shared_ptr<Afina::Storage> ps);
+    ~Worker();
+    Worker(const Worker& q) {this->ps = q.ps;}
+
+    /**
+     * Spaws new background thread that is doing epoll on the given server
+     * socket. Once connection accepted it must be registered and being processed
+     * on this thread
+     */
+    void Start(int server_socket);
+
+    /**
+     * Signal background thread to stop. After that signal thread must stop to
+     * accept new connections and must stop read new commands from existing. Once
+     * all readed commands are executed and results are send back to client, thread
+     * must stop
+     */
+    void Stop();
+
+    /**
+     * Blocks calling thread until background one for this worker is actually
+     * been destoryed
+     */
+    void Join();
+
+protected:
+    /**
+     * Method executing by background thread
+     */
+    void OnRun(int server_socket);
+    static void* RunProxy(void* args);
+    static void cleanup_worker(void* args);
+
+private:
+    pthread_t thread;
+    std::atomic<bool> running;
+    std::shared_ptr<Afina::Storage> ps;
+};
 
 struct Connection {
   Connection(int _fd) : fd(_fd), parser(), ready(false), offset(0), body_size(0), out() {
@@ -55,11 +105,16 @@ private:
   std::list<Connection> connections;
   int epfd;
   int server_socket;
+  int signal_fd;
+  int signal_num;
   epoll_event events[MAXEVENTS];
   std::shared_ptr<Afina::Storage> ps;
+  Worker* self_worker;
 public:
-  EpollManager(std::shared_ptr<Afina::Storage>& _ps, int _server_socket) : ps(_ps) {
+  EpollManager(std::shared_ptr<Afina::Storage>& _ps, Worker* _self_worker, int _server_socket) : ps(_ps), self_worker(_self_worker) {
     this->server_socket = _server_socket;
+    
+    // epoll specification
 
     if ((this->epfd = epoll_create(MAXEVENTS)) == -1) {
       throw std::runtime_error("epoll_create");
@@ -81,7 +136,7 @@ public:
     for (auto it = this->connections.begin(); it != this->connections.end(); ++it) {
       this->eraseConnection(*it);
     }
-    close(epfd);
+    close(this->epfd);
   }
 
   void addConnection(void) {
@@ -195,7 +250,23 @@ public:
       }
     }
   }
-
+ /* 
+  void processSignal(void) {
+    struct signalfd_siginfo sigs[this->signal_num];
+    int c = read(this->signal_fd, sigs, this->signal_num * sizeof(struct signalfd_siginfo));
+    int k = c / sizeof(struct signalfd_siginfo);
+    assert(c % sizeof(struct signalfd_siginfo) == 0);
+    for (int i = 0; i < k; ++i) {
+      if (sigs[i].ssi_signo == SIGINT) {
+        std::cout << "received SIGINT, stopping" << std::endl;
+        this->self_worker->Stop();
+      } else if (sigs[i].ssi_signo == SIGTERM) {
+        std::cout << "received SIGTERM, stopping" << std::endl;
+        this->self_worker->Stop();
+      }
+    }
+  }
+*/
   void processEvent() {
     int n;
     if ((n = epoll_wait(epfd, this->events, MAXEVENTS, -1)) == -1) {
@@ -223,51 +294,6 @@ public:
   }
 };
 
-/**
- * # Thread running epoll
- * On Start spaws background thread that is doing epoll on the given server
- * socket and process incoming connections and its data
- */
-class Worker {
-public:
-    Worker(std::shared_ptr<Afina::Storage> ps);
-    ~Worker();
-    Worker(const Worker& q) {this->ps = q.ps;}
-
-    /**
-     * Spaws new background thread that is doing epoll on the given server
-     * socket. Once connection accepted it must be registered and being processed
-     * on this thread
-     */
-    void Start(int server_socket);
-
-    /**
-     * Signal background thread to stop. After that signal thread must stop to
-     * accept new connections and must stop read new commands from existing. Once
-     * all readed commands are executed and results are send back to client, thread
-     * must stop
-     */
-    void Stop();
-
-    /**
-     * Blocks calling thread until background one for this worker is actually
-     * been destoryed
-     */
-    void Join();
-
-protected:
-    /**
-     * Method executing by background thread
-     */
-    void OnRun(int server_socket);
-    static void* RunProxy(void* args);
-    static void cleanup_worker(void* args);
-
-private:
-    pthread_t thread;
-    std::atomic<bool> running;
-    std::shared_ptr<Afina::Storage> ps;
-};
 
 } // namespace NonBlocking
 } // namespace Network
