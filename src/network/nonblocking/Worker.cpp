@@ -1,22 +1,9 @@
 #include "Worker.h"
 
-#include <iostream>
-
-#include <sys/epoll.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <protocol/Parser.h>
-#include "Utils.h"
-#include <map>
-#include <memory>
-#include <afina/Executor.h>
-#include <afina/execute/Command.h>
 namespace Afina {
 namespace Network {
 namespace NonBlocking {
 
-#define MAXEVENTS (100)
-#define SENDBUFLEN (1000)
 // See Worker.h
 Worker::Worker(std::shared_ptr<Afina::Storage> _ps) : ps(_ps) {}
 
@@ -53,13 +40,6 @@ void Worker::Join() {
     pthread_join(this->thread, NULL);
 }
 
-void Worker::cleanup_worker(void* _args) {
-  auto args = reinterpret_cast<std::tuple<Worker*, int>*>(_args);
-  Worker* worker_instance = std::get<0>(*args);
-  int epfd = std::get<1>(*args);
-  close(epfd);
-  delete args;
-}
 
 // See Worker.h
 void Worker::OnRun(int server_socket) {
@@ -75,159 +55,15 @@ void Worker::OnRun(int server_socket) {
     //
     // Do not forget to use EPOLLEXCLUSIVE flag when register socket
     // for events to avoid thundering herd type behavior.
-    std::map<int, std::string> text;
-    std::map<int, std::unique_ptr<Execute::Command>> com;
-    std::map<int, Protocol::Parser> parser;
-    std::map<int, size_t> parsed;
-    std::map<int, uint32_t> body_size;
-
-    int sendbuf_len = SENDBUFLEN;
-    int epfd = epoll_create(MAXEVENTS);
-    if (epfd == -1) {
-      throw std::runtime_error("cannot epoll_create");
-    }
-    epoll_event ev;
-    epoll_event events[MAXEVENTS];
-
-    ev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
-    ev.data.fd = server_socket; 
-
-    if (epoll_ctl(epfd, EPOLL_CTL_ADD, server_socket, &ev) == -1) {
-      throw std::runtime_error("cannot epoll_ctl");
-    }
-
-    auto args = new std::tuple<Worker*, int>(this, server_socket);
-    pthread_cleanup_push(Worker::cleanup_worker, args);
-     
+    EpollManager manager(this->ps, server_socket);
     while(running.load()) {
-      std::cout << "start wait" << std::endl;
-      int n = epoll_wait(epfd, events, MAXEVENTS, -1);
-      std::cout << "end wait" << std::endl;
-      if (n == -1) {
-        throw std::runtime_error("cannot epoll_wait");
+      try {
+        manager.processEvent();
+      } catch(std::exception& e) {
+        std::cout << e.what() << std::endl;
+        pthread_exit(NULL);
       }
-      std::cout << n << std::endl;
-      for (int i = 0; i < n; i++) {
-        if (events[i].data.fd == server_socket) {
-          if ((events[i].events & EPOLLIN) == EPOLLIN) {
-            int sock = accept(server_socket, NULL, NULL);
-            make_socket_non_blocking(sock);
-            ev.events = EPOLLIN | EPOLLHUP | EPOLLRDHUP | EPOLLERR;
-            ev.data.fd = sock;
-            if (epoll_ctl(epfd, EPOLL_CTL_ADD, sock, &ev) == -1) {
-              throw std::runtime_error("cannot epoll_ctl");
-            }
-            parsed.emplace(sock, 0);
-            parser.insert(std::make_pair(sock, Protocol::Parser()));
-            text.insert(std::make_pair(sock, ""));
-          } else if (((events[i].events & EPOLLERR) == EPOLLERR) && ((events[i].events & EPOLLHUP) == EPOLLHUP))  {
-            pthread_exit(NULL);
-          }
-        } else {
-          int sock = events[i].data.fd;
-          if ((events[i].events & EPOLLIN) == EPOLLIN) {
-            std::cout << "reading" << std::endl;
-            size_t sendbuf_len = SENDBUFLEN;
-            ssize_t s;
-            char buf[sendbuf_len + 1];
-            
-            if ((s = recv(sock, buf, sendbuf_len, 0)) <= 0) {
-              if (epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL) == -1) {
-                throw std::runtime_error("cannot epoll_ctl");
-              }
-              std::cout << "closing" << std::endl;
-              close(sock);
-              parser.erase(sock);
-              parsed.erase(sock);
-              com.erase(sock);
-              body_size.erase(sock);
-              text.erase(sock);
-            } else {
-              std::cout << "processing" << std::endl;
-              buf[s] = '\0';
-              std::string diff = std::string(buf);
-              text[sock] += std::string(buf);
-              std::cout << text[sock].length() << " command buf: " << text[sock] << std::endl;
-              bool waiting = false;
-              while((text[sock].length() > 2) && (not waiting)) {
-                //// 1 stage
-                if (body_size.find(sock) == body_size.end()) {
-                  try {
-                    if (!parser[sock].Parse(text[sock].data(), text[sock].length(), parsed[sock])) {
-                      std::cout << "no parsing" << std::endl;
-                    } else {
-                      text[sock].erase(0, parsed[sock]);
-                      parsed[sock] = 0;
-                      std::cout << "parsing" << std::endl;
-                      uint32_t _body_size;
-                      auto _com = parser[sock].Build(_body_size);
-                      com.emplace(sock, std::move(_com));
-                      body_size.emplace(sock, _body_size);
-                    }
-                  } catch(...) {
-                    std::cout << "parser error" << std::endl;
-                    std::string out = "Server Error";
-                    if (send(sock, out.data(), out.size(), 0) <= 0) {
-                      epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
-                      close(sock);
-                      parser.erase(sock);
-                      parsed.erase(sock);
-                      com.erase(sock);
-                      body_size.erase(sock);
-                      text.erase(sock);
-                      break;
-                    }
-                    text[sock] = "\r\n";
-                  }
-                }
-                //// 2 stage
-                if (body_size.find(sock) != body_size.end()) {
-                  if (text[sock].length() >= body_size[sock]) {
-                    std::string out; 
-                    std::string args;
-                    std::copy(text[sock].begin(), text[sock].begin() + body_size[sock], std::back_inserter(args));
-                    text[sock].erase(0, body_size[sock]);
-
-                    try {
-                      com[sock]->Execute(*(this->ps), args, out);
-                    } catch (...) {
-                      out = "Server Error";
-                    }
-
-                    if (send(sock, out.data(), out.size(), 0) <= 0) {
-                      epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
-                      close(sock);
-                      parser.erase(sock);
-                      parsed.erase(sock);
-                      com.erase(sock);
-                      body_size.erase(sock);
-                      text.erase(sock);
-                      break;
-                    }
-                    body_size.erase(sock);
-                    com.erase(sock);
-                    waiting = false;
-                  } else {
-                    waiting = true;
-                  }
-                }
-              } // while(processing client)
-            } // recv
-          } else {
-            std::cout << "error" << std::endl;
-            epoll_ctl(epfd, EPOLL_CTL_DEL, sock, NULL);
-            close(sock);
-            parser.erase(sock);
-            parsed.erase(sock);
-            text.erase(sock);
-            com.erase(sock);
-            body_size.erase(sock);
-          }
-        } // client socket
-      } // for (events)
     } // while(running)
-    pthread_cleanup_pop(1);
-    pthread_exit(NULL);
 } // fundtion
 
 } // namespace NonBlocking

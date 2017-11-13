@@ -62,15 +62,22 @@ class Executor {
 
 private:
     // No copy/move/assign allowed
-    Executor(const Executor &);            // = delete;
-    Executor(Executor &&);                 // = delete;
-    Executor &operator=(const Executor &); // = delete;
-    Executor &operator=(Executor &&);      // = delete;
+    Executor(const Executor &)             = delete;
+    Executor(Executor &&)                  = delete;
+    Executor &operator=(const Executor &)  = delete;
+    Executor &operator=(Executor &&)       = delete;
 
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
-    friend void perform(Executor *executor);
+    friend void perform(Executor *executor) {
+      std::function<void()> task;
+      {
+        std::unique_lock<std::mutex> lk(executor->mutex);
+        task = executor->tasks.front();
+      }
+      task();
+    }
 
     /**
      * Mutex to protect state below from concurrent modification
