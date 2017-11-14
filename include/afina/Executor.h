@@ -11,10 +11,17 @@
 
 namespace Afina {
 
+static void* perform(void*);
+
 /**
  * # Thread pool
  */
 class Executor {
+    /**
+     * Main function that all pool threads are running. It polls internal task queue and execute tasks
+     */
+    friend void* perform(void* args);
+
     enum class State {
         // Threadpool is fully operational, tasks could be added and get executed
         kRun,
@@ -27,7 +34,19 @@ class Executor {
         kStopped
     };
     
-    Executor(std::string name, int size); 
+    Executor(std::string name, int size) { 
+      if (name == "kRun") {
+        this->state = State::kRun;
+      } else if (name == "kStopping") {
+        this->state = State::kStopping;
+      } else if (name == "kStopped") {
+        this->state = State::kStopped;
+      }
+      for (int i = 0; i < size; ++i) {
+        this->threads.emplace_back(perform, this);
+      }
+    }
+
     ~Executor() {};
 
     /**
@@ -47,17 +66,10 @@ class Executor {
     } 
     
     void Join(void) {
-      int n;
-      {
-        std::unique_lock<std::mutex> lk(this->mutex);
-        n = this->threads.size();
-      }
-      for (int i = 0; i < n; ++i) {
-        std::unique_lock<std::mutex> lk(this->mutex);
-        if (this->threads[0].joinable()) {
-          this->threads[0].join();
+      for (int i = 0; i < this->threads.size(); ++i) {
+        if (this->threads[i].joinable()) {
+          this->threads[i].join();
         }
-        this->threads.erase(this->threads.begin());
       }
     }
 
@@ -97,10 +109,6 @@ private:
     Executor &operator=(const Executor &)  = delete;
     Executor &operator=(Executor &&)       = delete;
 
-    /**
-     * Main function that all pool threads are running. It polls internal task queue and execute tasks
-     */
-    friend void* perform(void* args);
 
     /**
      * Mutex to protect state below from concurrent modification
@@ -143,27 +151,9 @@ void* perform(void* args) {
     }
     task();
   }
-  {
-    std::unique_lock<std::mutex> lk(executor->mutex);
-    if (executor->threads.size() == 0) {
-      executor->state = Executor::State::kStopped;
-    }
-  }
   return NULL;
 }
 
-Executor::Executor(std::string name, int size) {
-  if (name == "kRun") {
-    this->state = State::kRun;
-  } else if (name == "kStopping") {
-    this->state = State::kStopping;
-  } else if (name == "kStopped") {
-    this->state = State::kStopped;
-  }
-  for (int i = 0; i < size; ++i) {
-    this->threads.emplace_back(perform, this);
-  }
-}
 
 
 } // namespace Afina
