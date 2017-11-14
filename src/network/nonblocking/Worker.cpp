@@ -14,9 +14,10 @@ void* Worker::RunProxy(void* _args) {
   auto args = reinterpret_cast<std::pair<Worker*, int>*>(_args);
   Worker* worker_instance = args->first;
   int server_socket = args->second;
+  worker_instance->thread = pthread_self();
   worker_instance->OnRun(server_socket);
-  return NULL;
   delete args;
+  return NULL;
 }
 
 // See Worker.h
@@ -24,7 +25,8 @@ void Worker::Start(int server_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     this->running.store(true);
     auto args = new std::pair<Worker*, int>(this, server_socket);
-    if (pthread_create(&thread, NULL, Worker::RunProxy, args) != 0) {
+    pthread_t _thread;
+    if (pthread_create(&_thread, NULL, &(Worker::RunProxy), args) != 0) {
       throw std::runtime_error("cannot create a thread");
     }
 }
@@ -57,7 +59,6 @@ void Worker::OnRun(int server_socket) {
     // for events to avoid thundering herd type behavior.
     try {
       EpollManager manager(this->ps, this, server_socket);
-      std::cout << std::boolalpha << this->running.load() << std::endl;
       while(running.load()) {
         try {
           manager.processEvent();

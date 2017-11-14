@@ -104,14 +104,18 @@ class EpollManager {
 private:
   std::list<Connection> connections;
   int epfd;
-  int server_socket;
   int signal_fd;
   int signal_num;
+  int server_socket;
+  sigset_t mask;
   epoll_event events[MAXEVENTS];
   std::shared_ptr<Afina::Storage> ps;
   Worker* self_worker;
 public:
   EpollManager(std::shared_ptr<Afina::Storage>& _ps, Worker* _self_worker, int _server_socket) : ps(_ps), self_worker(_self_worker) {
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGTERM);
+    sigaddset(&mask, SIGINT);
     this->server_socket = _server_socket;
     
     // epoll specification
@@ -130,6 +134,16 @@ public:
     if (epoll_ctl(this->epfd, EPOLL_CTL_ADD, server_socket, &ev) == -1) {
       throw std::runtime_error("epoll_ctl");
     }
+    /*
+    if ((signal_fd = signalfd(-1, &mask, SFD_NONBLOCK)) == -1) {
+      throw std::runtime_error("signalfd");
+    }
+    connections.emplace_back(signal_fd);
+    connections.back().it = std::next(connections.end(), -1);
+    if (epoll_ctl(this->epfd, EPOLL_CTL_ADD, signal_fd, &ev) == -1) {
+      throw std::runtime_error("epoll_ctl");
+    }
+    */
   }
 
   ~EpollManager(void) {
@@ -250,7 +264,7 @@ public:
       }
     }
   }
- /* 
+
   void processSignal(void) {
     struct signalfd_siginfo sigs[this->signal_num];
     int c = read(this->signal_fd, sigs, this->signal_num * sizeof(struct signalfd_siginfo));
@@ -259,17 +273,15 @@ public:
     for (int i = 0; i < k; ++i) {
       if (sigs[i].ssi_signo == SIGINT) {
         std::cout << "received SIGINT, stopping" << std::endl;
-        this->self_worker->Stop();
       } else if (sigs[i].ssi_signo == SIGTERM) {
         std::cout << "received SIGTERM, stopping" << std::endl;
-        this->self_worker->Stop();
       }
     }
   }
-*/
+
   void processEvent() {
     int n;
-    if ((n = epoll_wait(epfd, this->events, MAXEVENTS, -1)) == -1) {
+    if ((n = epoll_wait(epfd, this->events, MAXEVENTS, 10000)) == -1) {
       throw std::runtime_error("epoll_wait");
     }
     for (int i = 0; i < n; ++i) {

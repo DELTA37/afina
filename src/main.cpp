@@ -17,8 +17,9 @@
 #include <unistd.h>
 #include <string.h>
 
-#include <signalfd.h>
-#include <timerfd.h>
+#include <sys/signalfd.h>
+#include <sys/timerfd.h>
+#include <sys/epoll.h>
 
 typedef struct {
     std::shared_ptr<Afina::Storage> storage;
@@ -36,8 +37,13 @@ void signal_handler(uv_signal_t *handle, int signum) {
 // Called when it is time to collect passive metrics from services
 void timer_handler(uv_timer_t *handle) {
     Application *pApp = static_cast<Application *>(handle->data);
-    //std::cout << "Start passive metrics collection" << std::endl;
+    std::cout << "Start passive metrics collection" << std::endl;
 }
+
+void timerfd_handler(Application* pApp) {
+  std::cout << "Start passive metrics collection" << std::endl;
+}
+
 
 int main(int argc, char **argv) {
     bool daemon_mode = false;
@@ -178,26 +184,45 @@ int main(int argc, char **argv) {
 
         int epfd = epoll_create(2);
 
+        int signal_num = 2;
         sigset_t mask;
         sigemptyset(&mask);
         sigaddset(&mask, SIGINT);
         sigaddset(&mask, SIGTERM);
-        int sigfd = signalfd(-1, &mask, SFD_NONBLOCK);
-
-        int timer = timerfd_create(CLOCK_REALTIME, 0);
-
+        if (pthread_sigmask(SIG_BLOCK, &mask, NULL) == -1) {
+          std::cerr << "Fatal error: pthread_sigmask" << std::endl;
+          return 1;
+        }
+        int sigfd;
+        if ((sigfd = signalfd(-1, &mask, SFD_NONBLOCK)) == -1) {
+          std::cerr << "Fatal error: signalfd" << std::endl;
+          return 1;
+        }
         epoll_event sigev;
-        sigev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
+        sigev.events = EPOLLIN | EPOLLERR;
         sigev.data.fd = sigfd;
-
-        epoll_event timerev;
-        timerev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
-        timerev.data.fd = timer;
-
         if (epoll_ctl(epfd, EPOLL_CTL_ADD, sigfd, &sigev) == -1) {
           std::cerr << "Fatal error: epoll_ctl" << std::endl;
           return 1;
         }
+
+        itimerspec timer_spec;
+        timer_spec.it_interval.tv_sec = 5;
+        timer_spec.it_interval.tv_nsec = 0;
+        timer_spec.it_value.tv_sec = 5;
+        timer_spec.it_value.tv_nsec = 0;
+        int timerfd;
+        if ((timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK)) == -1) {
+          std::cerr << "Fatal error: timerfd_create" << std::endl;
+          return 1;
+        }
+        if (timerfd_settime(timerfd, TFD_TIMER_ABSTIME, &timer_spec, NULL) == -1) {
+          std::cerr << "Fatal error: timer_settime" << std::endl;
+          return 1;
+        }
+        epoll_event timerev;
+        timerev.events = EPOLLIN | EPOLLERR;
+        timerev.data.fd = timerfd;
 
         if (epoll_ctl(epfd, EPOLL_CTL_ADD, timerfd, &timerev) == -1) {
           std::cerr << "Fatal error: epoll_ctl" << std::endl;
@@ -206,15 +231,51 @@ int main(int argc, char **argv) {
 
         try {
           app.storage->Start();
-          app.server->Start(8080, 3);
+          app.server->Start(8080, 10);
+          epoll_event evs[2];
           while(1) {
-            
+            int n = epoll_wait(epfd, evs, 2, -1);
+            for (int i = 0; i < n; ++i) {
+              if ((evs[i].events & EPOLLIN) == EPOLLIN) {
+                if (evs[i].data.fd == sigfd) {
+                  struct signalfd_siginfo sigs[signal_num];
+                  int c = read(sigfd, sigs, signal_num * sizeof(struct signalfd_siginfo));
+                  int k = c / sizeof(struct signalfd_siginfo);
+                  for (int i = 0; i < k; ++i) {
+                    if (sigs[i].ssi_signo == SIGINT) {
+                      std::cout << "received SIGINT, stopping" << std::endl;
+                      app.server->Stop();
+                      app.server->Join();
+                      app.storage->Stop();
+                      return 0;
+                    } else if (sigs[i].ssi_signo == SIGTERM) {
+                      std::cout << "received SIGTERM, stopping" << std::endl;
+                      app.server->Stop();
+                      app.server->Join();
+                      app.storage->Stop();
+                      return 0;
+                    }
+                  }
+                } else if (evs[i].data.fd == timerfd) {
+                  uint64_t clk_num = 0;
+                  if (read(timerfd, &clk_num, sizeof(uint64_t))) {
+                    if (clk_num > 0) {
+                      timerfd_handler(&app);
+                    } 
+                  }
+                }
+              } else {
+                throw std::runtime_error("Fatal error descriptor");
+              }
+            }
           }
         } catch(std::exception& e) {
             std::cerr << "Fatal error" << e.what() << std::endl;
             return 1;
         }
-
+        close(epfd);
+        close(timerfd);
+        close(sigfd);
         std::cout << "Application started" << std::endl;
 
     } else {
