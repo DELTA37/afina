@@ -16,7 +16,6 @@ void* Worker::RunProxy(void* _args) {
   int server_socket = args->second;
   worker_instance->thread = pthread_self();
   worker_instance->OnRun(server_socket);
-  delete args;
   return NULL;
 }
 
@@ -64,10 +63,10 @@ void Worker::OnRun(int server_socket) {
           manager.processEvent();
         } catch(std::exception& e) {
           std::cout << e.what() << std::endl;
-          pthread_exit(NULL);
+          //pthread_exit(NULL);
         }
       } // while(running)
-
+      
     } catch (std::exception& e) {
       std::cout << e.what() << std::endl;
     }

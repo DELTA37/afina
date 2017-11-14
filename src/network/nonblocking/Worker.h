@@ -86,6 +86,7 @@ struct Connection {
   Connection(int _fd) : fd(_fd), parser(), ready(false), offset(0), body_size(0), out() {
     out.resize(0);
   }
+  ~Connection(void) {}
   int fd;
 
   Protocol::Parser parser;
@@ -103,9 +104,11 @@ struct Connection {
 class EpollManager {
 private:
   std::list<Connection> connections;
+
+  int fifo_infd;
+  int fifo_outfd;
+
   int epfd;
-  int signal_fd;
-  int signal_num;
   int server_socket;
   sigset_t mask;
   epoll_event events[MAXEVENTS];
@@ -134,23 +137,17 @@ public:
     if (epoll_ctl(this->epfd, EPOLL_CTL_ADD, server_socket, &ev) == -1) {
       throw std::runtime_error("epoll_ctl");
     }
-    /*
-    if ((signal_fd = signalfd(-1, &mask, SFD_NONBLOCK)) == -1) {
-      throw std::runtime_error("signalfd");
-    }
-    connections.emplace_back(signal_fd);
-    connections.back().it = std::next(connections.end(), -1);
-    if (epoll_ctl(this->epfd, EPOLL_CTL_ADD, signal_fd, &ev) == -1) {
-      throw std::runtime_error("epoll_ctl");
-    }
-    */
+    fifo_infd = -1;
+    fifo_outfd = -1;
   }
 
   ~EpollManager(void) {
-    for (auto it = this->connections.begin(); it != this->connections.end(); ++it) {
-      this->eraseConnection(*it);
-    }
     close(this->epfd);
+  }
+  
+  void addFIFO(int infd, int outfd=-1) {
+    this->fifo_infd = infd;
+    this->fifo_outfd = outfd;
   }
 
   void addConnection(void) {
@@ -178,11 +175,24 @@ public:
     this->connections.erase(con.it);
   }
   
-  void processConnection(Connection& con, const char* buf, int len) {
+  void processConnection(Connection& con, const char* buf, int len, std::string type="Socket") {
     while(len != 0) {
       if (!con.ready) {
         size_t parsed = 0;
-        con.ready = con.parser.Parse(buf, len, parsed);
+        try {
+          con.ready = con.parser.Parse(buf, len, parsed);
+        } catch(...) {
+          con.out.push_back("Server Error");
+          con.ready = false;
+          con.offset = 0;
+          con.body_size = 0;
+          if (type == "Socket") {
+            this->writeSocket(con);
+          } else if (type == "FIFO") {
+            this->writeFIFO(con);
+          }
+          return;
+        }
         if (con.ready) {
           con.cmd = std::move(con.parser.Build(con.body_size));
           con.parser.Reset();
@@ -228,7 +238,11 @@ public:
           con.body_size = 0;
         }
       }
-      this->writeSocket(con);
+      if (type == "Socket") {
+        this->writeSocket(con);
+      } else if (type == "FIFO") {
+        this->writeFIFO(con);
+      }
     }
   }
 
@@ -264,19 +278,12 @@ public:
       }
     }
   }
-
-  void processSignal(void) {
-    struct signalfd_siginfo sigs[this->signal_num];
-    int c = read(this->signal_fd, sigs, this->signal_num * sizeof(struct signalfd_siginfo));
-    int k = c / sizeof(struct signalfd_siginfo);
-    assert(c % sizeof(struct signalfd_siginfo) == 0);
-    for (int i = 0; i < k; ++i) {
-      if (sigs[i].ssi_signo == SIGINT) {
-        std::cout << "received SIGINT, stopping" << std::endl;
-      } else if (sigs[i].ssi_signo == SIGTERM) {
-        std::cout << "received SIGTERM, stopping" << std::endl;
-      }
-    }
+  
+  void readFIFO(Connection& con) {
+    // specify for FIFO
+  }
+  void writeFIFO(Connection& con) {
+    // specify for FIFO
   }
 
   void processEvent() {
@@ -293,12 +300,18 @@ public:
         } else {
           throw std::runtime_error("server socket failed");
         }
+      } else if (sock == this->fifo_infd) {
+        this->readFIFO(*con_data);
+        this->writeFIFO(*con_data);
+      } else if (sock == this->fifo_outfd) {
+        this->writeFIFO(*con_data);
       } else {
         if ((events[i].events & EPOLLIN) == EPOLLIN) {
           this->readSocket(*con_data);
         } else if ((events[i].events & EPOLLOUT) == EPOLLOUT) {
           this->writeSocket(*con_data);
         } else {
+          std::cout << "here" << std::endl;
           this->eraseConnection(*con_data);
         }
       }

@@ -69,6 +69,8 @@ int main(int argc, char **argv) {
         options.add_options()("h,help", "Print usage info");
         options.add_options()("p,pidmode", "Print pid and exit", cxxopts::value<std::string>());
         options.add_options()("d,daemonmode", "Daemon mode");
+        options.add_options()("r,readfifo", "Readfifo mode", cxxopts::value<std::string>());
+        options.add_options()("w,writefifo", "Writefifo mode", cxxopts::value<std::string>());
         options.parse(argc, argv);
 
         if (options.count("help") > 0) {
