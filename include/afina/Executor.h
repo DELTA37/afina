@@ -26,9 +26,9 @@ class Executor {
         // Threadppol is stopped
         kStopped
     };
-
-    Executor(std::string name, int size);
-    ~Executor();
+    
+    Executor(std::string name, int size); 
+    ~Executor() {};
 
     /**
      * Signal thread pool to stop, it will stop accepting new jobs and close threads just after each become
@@ -36,7 +36,37 @@ class Executor {
      *
      * In case if await flag is true, call won't return until all background jobs are done and all threads are stopped
      */
-    void Stop(bool await = false);
+
+    void setState(State _state) {
+      std::unique_lock<std::mutex> lk(this->mutex);
+      this->state = _state;
+    } 
+    State getState(void) {
+      std::unique_lock<std::mutex> lk(this->mutex);
+      return this->state;
+    } 
+    
+    void Join(void) {
+      int n;
+      {
+        std::unique_lock<std::mutex> lk(this->mutex);
+        n = this->threads.size();
+      }
+      for (int i = 0; i < n; ++i) {
+        std::unique_lock<std::mutex> lk(this->mutex);
+        if (this->threads[0].joinable()) {
+          this->threads[0].join();
+        }
+        this->threads.erase(this->threads.begin());
+      }
+    }
+
+    void Stop(bool await = false) {
+      this->setState(State::kStopping);
+      if (await) {
+        this->Join();
+      }
+    }
 
     /**
      * Add function to be executed on the threadpool. Method returns true in case if task has been placed
@@ -70,14 +100,7 @@ private:
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
-    friend void perform(Executor *executor) {
-      std::function<void()> task;
-      {
-        std::unique_lock<std::mutex> lk(executor->mutex);
-        task = executor->tasks.front();
-      }
-      task();
-    }
+    friend void* perform(void* args);
 
     /**
      * Mutex to protect state below from concurrent modification
@@ -104,6 +127,44 @@ private:
      */
     State state;
 };
+
+void* perform(void* args) {
+  Executor* executor = reinterpret_cast<Executor*>(args);
+  while(executor->getState() == Executor::State::kRun) {
+    std::function<void()> task;
+    {
+      std::unique_lock<std::mutex> lk(executor->mutex);
+      executor->empty_condition.wait(lk, [&executor]() {return (executor->tasks.size() > 0) || (executor->state == Executor::State::kStopping);});
+      if (executor->state == Executor::State::kStopping) {
+        break;
+      }
+      task = executor->tasks.front();
+      executor->tasks.pop_front();
+    }
+    task();
+  }
+  {
+    std::unique_lock<std::mutex> lk(executor->mutex);
+    if (executor->threads.size() == 0) {
+      executor->state = Executor::State::kStopped;
+    }
+  }
+  return NULL;
+}
+
+Executor::Executor(std::string name, int size) {
+  if (name == "kRun") {
+    this->state = State::kRun;
+  } else if (name == "kStopping") {
+    this->state = State::kStopping;
+  } else if (name == "kStopped") {
+    this->state = State::kStopped;
+  }
+  for (int i = 0; i < size; ++i) {
+    this->threads.emplace_back(perform, this);
+  }
+}
+
 
 } // namespace Afina
 
