@@ -46,49 +46,9 @@ void timerfd_handler(Application* pApp) {
 
 
 int main(int argc, char **argv) {
-    bool daemon_mode = false;
-    bool p_mode = false;
-    char filename[100];
-    if (argc > 1) {
-      for (size_t i = 1; i < argc; i++) {
-        printf("%s\n", argv[i]);
-        if (strcmp(argv[i], "-p") == 0) {
-          if (i == argc - 1 && not p_mode) {
-            printf("Usage:\n-p print pid\n-d devil(daemon) mode");
-            return -1;
-          }
-          strcpy(filename, argv[i + 1]);
-          printf("%s\n", argv[i + 1]);
-          p_mode = true;
-          i++;
-        } else if (strcmp(argv[i], "-d") == 0) {
-          daemon_mode = true;
-        }
-      }
-    }
-    if (p_mode) {
-      FILE* fp;
-      fp = fopen(filename, "w");
-      fprintf(fp, "%u", getpid());
-      fclose(fp);
-    }
-    if (daemon_mode) {
-      pid_t p = fork();
-      if (p != 0) {
-        exit(EXIT_SUCCESS);
-      } else {
-        if (p_mode) {
-          FILE* fp;
-          fp = fopen(filename, "w");
-          fprintf(fp, "%u", getpid());
-          fclose(fp);
-        }
-        setsid();
-        fclose(stdin);
-        fclose(stdout);
-        fclose(stderr);
-      }
-    }
+    bool pid_mode;
+    bool daemon_mode;
+    bool fifo_mode;
     std::cout << "Starting Afina " << Afina::Version_Major << "." << Afina::Version_Minor << "."
               << Afina::Version_Patch;
 
@@ -107,6 +67,8 @@ int main(int argc, char **argv) {
         options.add_options()("s,storage", "Type of storage service to use", cxxopts::value<std::string>());
         options.add_options()("n,network", "Type of network service to use", cxxopts::value<std::string>());
         options.add_options()("h,help", "Print usage info");
+        options.add_options()("p,pidmode", "Print pid and exit", cxxopts::value<std::string>());
+        options.add_options()("d,daemonmode", "Daemon mode");
         options.parse(argc, argv);
 
         if (options.count("help") > 0) {
@@ -116,6 +78,30 @@ int main(int argc, char **argv) {
     } catch (cxxopts::OptionParseException &ex) {
         std::cerr << "Error: " << ex.what() << std::endl;
         return 1;
+    }
+    std::string filename;
+    if (options.count("pidmode") > 0) {
+      pid_mode = true;
+      filename = options["pidmode"].as<std::string>();
+    }
+    if (options.count("daemonmode") > 0) {
+      daemon_mode = true;
+      pid_t p = fork();
+      if (p != 0) {
+        exit(EXIT_SUCCESS);
+      } else {
+        setsid();
+        fclose(stdin);
+        fclose(stdout);
+        fclose(stderr);
+      }
+    }
+
+    if (pid_mode) {
+      FILE* fp;
+      fp = fopen(filename.c_str(), "w");
+      fprintf(fp, "%u", getpid());
+      fclose(fp);
     }
 
     // Start boot sequence
