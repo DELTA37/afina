@@ -70,7 +70,7 @@ public:
      */
     void Join();
     
-    void addFIFO(std::string rfifo, std::string wfifo);
+    void addFIFO(std::string rfifo, std::string wfifo, bool rfifo_mode, bool wfifo_mode);
 protected:
     /**
      * Method executing by background thread
@@ -85,6 +85,8 @@ private:
     std::shared_ptr<Afina::Storage> ps;
     std::string rfifo;
     std::string wfifo;
+    bool rfifo_mode;
+    bool wfifo_mode;
 };
 
 struct Connection {
@@ -150,11 +152,11 @@ public:
     close(this->epfd);
   }
   
-  void addFIFO(std::string rfifo="", std::string wfifo="") {
-    if (rfifo.empty()) {
+  void addFIFO(std::string rfifo, std::string wfifo="", bool rfifo_mode=false, bool wfifo_mode=false) {
+    if (!rfifo_mode) {
       return;
     }
-    
+
     if (mkfifo(rfifo.c_str(), 777) < 0) {
       throw std::runtime_error("mkfifo");
     }
@@ -173,7 +175,7 @@ public:
       throw std::runtime_error("epoll_ctl");
     }
 
-    if (wfifo.empty()) {
+    if (!wfifo_mode) {
       return;
     }
       
@@ -226,9 +228,7 @@ public:
       if (!con.ready) {
         size_t parsed = 0;
         try {
-          std::cout << "parsing: " << std::string(buf) << std::endl;
           con.ready = con.parser.Parse(buf, len, parsed);
-          std::cout << "parsed: " << parsed << std::endl;
         } catch(...) {
           con.out.push_back("Server Error");
           con.ready = false;
@@ -335,8 +335,9 @@ public:
       processConnection(con, buf, len);
     }
     if (len < 0) {
-      eraseConnection(con);
-      this->fifo_infd = -1;
+      con.parser.Reset();
+      con.body_size = 0;
+      con.offset = 0;
     }
   }
   void writeFIFO(Connection& con) {
@@ -354,8 +355,7 @@ public:
       }
       c = write(this->fifo_outfd, con.out[0].data(), con.out[0].length());
       if (c < 0) {
-        this->eraseConnection(con);
-        this->fifo_outfd = -1;
+        con.out.clear();
         break;
       }
       con.out[0].erase(0, c);
@@ -390,7 +390,6 @@ public:
         } else if ((events[i].events & EPOLLOUT) == EPOLLOUT) {
           this->writeSocket(*con_data);
         } else {
-          std::cout << "here" << std::endl;
           this->eraseConnection(*con_data);
         }
       }

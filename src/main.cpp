@@ -48,7 +48,8 @@ void timerfd_handler(Application* pApp) {
 int main(int argc, char **argv) {
     bool pid_mode;
     bool daemon_mode;
-    bool fifo_mode;
+    bool rfifo_mode = false;
+    bool wfifo_mode = false;
     std::string rfifo = "";
     std::string wfifo = "";
     std::cout << "Starting Afina " << Afina::Version_Major << "." << Afina::Version_Minor << "."
@@ -85,9 +86,10 @@ int main(int argc, char **argv) {
     }
     
     if (options.count("readfifo") > 0) {
-      fifo_mode = true;
+      rfifo_mode = true;
       rfifo = options["readfifo"].as<std::string>();
       if (options.count("writefifo") > 0) {
+        wfifo_mode = true;
         wfifo = options["writefifo"].as<std::string>();
       }
     }
@@ -230,8 +232,8 @@ int main(int argc, char **argv) {
 
         try {
           app.storage->Start();
-          app.server->Start(8080, 10);
-          app.server->addFIFO(rfifo, wfifo);
+          app.server->addFIFO(rfifo, wfifo, rfifo_mode, wfifo_mode);
+          app.server->Start(8080, 7);
           epoll_event evs[2];
           while(1) {
             int n = epoll_wait(epfd, evs, 2, -1);

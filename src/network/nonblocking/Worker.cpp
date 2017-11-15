@@ -5,13 +5,15 @@ namespace Network {
 namespace NonBlocking {
 
 // See Worker.h
-Worker::Worker(std::shared_ptr<Afina::Storage> _ps) : ps(_ps) {}
+Worker::Worker(std::shared_ptr<Afina::Storage> _ps) : ps(_ps), rfifo(""), wfifo(""), rfifo_mode(false), wfifo_mode(false) {}
 
 // See Worker.h
 Worker::~Worker() {}
 
 
-void Worker::addFIFO(std::string rfifo, std::string wfifo) {
+void Worker::addFIFO(std::string rfifo, std::string wfifo, bool rfifo_mode, bool wfifo_mode) {
+  this->rfifo_mode = rfifo_mode;
+  this->wfifo_mode = wfifo_mode;
   this->rfifo = rfifo;
   this->wfifo = wfifo;
 }
@@ -51,6 +53,7 @@ void Worker::Join() {
 
 // See Worker.h
 void Worker::OnRun(int server_socket) {
+    assert(pthread_self() == this->thread);
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     // TODO: implementation here
     // 1. Create epoll_context here
@@ -64,7 +67,7 @@ void Worker::OnRun(int server_socket) {
     // for events to avoid thundering herd type behavior.
     try {
       EpollManager manager(this->ps, this, server_socket);
-      manager.addFIFO(this->rfifo, this->wfifo);
+      manager.addFIFO(this->rfifo, this->wfifo, this->rfifo_mode, this->wfifo_mode);
       while(running.load()) {
         try {
           manager.processEvent();

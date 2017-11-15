@@ -24,12 +24,14 @@ namespace Network {
 namespace NonBlocking {
 
 // See Server.h
-ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps) : Server(ps) {}
+ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps) : Server(ps), rfifo_mode(false), wfifo_mode(false) {}
 
 // See Server.h
 ServerImpl::~ServerImpl() {}
 
-void ServerImpl::addFIFO(std::string rfifo, std::string wfifo) {
+void ServerImpl::addFIFO(std::string rfifo, std::string wfifo, bool rfifo_mode, bool wfifo_mode) {
+  this->rfifo_mode = rfifo_mode;
+  this->wfifo_mode = wfifo_mode * rfifo_mode;
   this->rfifo = rfifo;
   this->wfifo = wfifo;
 }
@@ -80,9 +82,13 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
     for (int i = 0; i < n_workers; i++) {
         workers.emplace_back(pStorage);
         if (i == 0) {
-          workers.back().addFIFO(rfifo, wfifo);
+          workers.back().addFIFO(rfifo, wfifo, rfifo_mode, wfifo_mode);
         }
-        workers.back().Start(server_socket);
+        try {
+          workers.back().Start(server_socket);
+        } catch(std::exception& e) {
+          std::cout << e.what() << std::endl;
+        }
     }
 }
 

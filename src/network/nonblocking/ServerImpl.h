@@ -24,7 +24,7 @@ public:
     // See Server.h
     void Start(uint32_t port, uint16_t workers) override;
 
-    void addFIFO(std::string rfifo, std::string wfifo="") override;
+    void addFIFO(std::string rfifo, std::string wfifo, bool rfifo_mode=false, bool wfifo_mode=false) override;
 
     // See Server.h
     void Stop() override;
@@ -40,6 +40,8 @@ private:
 
     std::string rfifo;
     std::string wfifo;
+    bool rfifo_mode;
+    bool wfifo_mode;
 
     // Thread that is accepting new connections
     std::vector<Worker> workers;
