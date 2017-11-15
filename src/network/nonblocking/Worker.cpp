@@ -16,13 +16,13 @@ void Worker::addFIFO(std::string rfifo, std::string wfifo, bool rfifo_mode, bool
   this->wfifo_mode = wfifo_mode;
   this->rfifo = rfifo;
   this->wfifo = wfifo;
+  std::cout << rfifo << std::endl;
 }
 
 void* Worker::RunProxy(void* _args) {
   auto args = reinterpret_cast<std::pair<Worker*, int>*>(_args);
   Worker* worker_instance = args->first;
   int server_socket = args->second;
-  worker_instance->thread = pthread_self();
   worker_instance->OnRun(server_socket);
   return NULL;
 }
@@ -32,8 +32,7 @@ void Worker::Start(int server_socket) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     this->running.store(true);
     auto args = new std::pair<Worker*, int>(this, server_socket);
-    pthread_t _thread;
-    if (pthread_create(&_thread, NULL, &(Worker::RunProxy), args) != 0) {
+    if (pthread_create(&(this->thread), NULL, &(Worker::RunProxy), args) != 0) {
       throw std::runtime_error("cannot create a thread");
     }
 }
@@ -53,7 +52,7 @@ void Worker::Join() {
 
 // See Worker.h
 void Worker::OnRun(int server_socket) {
-    assert(pthread_self() == this->thread);
+    //assert(pthread_equal(pthread_self(), this->thread) != 0);
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     // TODO: implementation here
     // 1. Create epoll_context here
@@ -73,7 +72,6 @@ void Worker::OnRun(int server_socket) {
           manager.processEvent();
         } catch(std::exception& e) {
           std::cout << e.what() << std::endl;
-          //pthread_exit(NULL);
         }
       } // while(running)
       

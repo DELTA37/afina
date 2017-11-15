@@ -152,17 +152,17 @@ public:
     close(this->epfd);
   }
   
-  void addFIFO(std::string rfifo, std::string wfifo="", bool rfifo_mode=false, bool wfifo_mode=false) {
+  void addFIFO(std::string rfifo, std::string wfifo, bool rfifo_mode, bool wfifo_mode) {
     if (!rfifo_mode) {
       return;
     }
 
     if (mkfifo(rfifo.c_str(), 777) < 0) {
-      throw std::runtime_error("mkfifo");
+      throw std::runtime_error("mkfifo r " + rfifo);
     }
     this->fifo_infd = open(rfifo.c_str(), O_RDONLY | O_NONBLOCK);
     if (this->fifo_infd < 0) {
-      throw std::runtime_error("fifo open");
+      throw std::runtime_error("r fifo open");
     }
 
     connections.emplace_back(this->fifo_infd);
@@ -180,11 +180,11 @@ public:
     }
       
     if (mkfifo(wfifo.c_str(), 777) < 0) {
-      throw std::runtime_error("mkfifo");
+      throw std::runtime_error("mkfifo w");
     }
     this->fifo_outfd = open(wfifo.c_str(), O_WRONLY | O_NONBLOCK);
     if (this->fifo_outfd < 0) {
-      throw std::runtime_error("fifo open");
+      throw std::runtime_error("w fifo open");
     }
 
     connections.emplace_back(this->fifo_outfd);
