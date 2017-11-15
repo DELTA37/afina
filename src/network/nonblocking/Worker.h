@@ -23,6 +23,8 @@
 #include <memory>
 #include <afina/Executor.h>
 #include <afina/execute/Command.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #define MAXEVENTS (100)
 #define SENDBUFLEN (1000)
@@ -67,7 +69,8 @@ public:
      * been destoryed
      */
     void Join();
-
+    
+    void addFIFO(std::string rfifo, std::string wfifo);
 protected:
     /**
      * Method executing by background thread
@@ -80,6 +83,8 @@ private:
     pthread_t thread;
     std::atomic<bool> running;
     std::shared_ptr<Afina::Storage> ps;
+    std::string rfifo;
+    std::string wfifo;
 };
 
 struct Connection {
@@ -145,9 +150,18 @@ public:
     close(this->epfd);
   }
   
-  void addFIFO(int infd, int outfd=-1) {
-    this->fifo_infd = infd;
-    this->fifo_outfd = outfd;
+  void addFIFO(std::string rfifo="", std::string wfifo="") {
+    if (rfifo.empty()) {
+      return;
+    }
+    
+    if (mkfifo(rfifo.c_str(), 777) < 0) {
+      throw std::runtime_error("mkfifo");
+    }
+    this->fifo_infd = open(rfifo.c_str(), O_RDONLY | O_NONBLOCK);
+    if (this->fifo_infd < 0) {
+      throw std::runtime_error("fifo open");
+    }
 
     connections.emplace_back(this->fifo_infd);
     connections.back().it = std::next(connections.end(), -1);
@@ -159,16 +173,26 @@ public:
       throw std::runtime_error("epoll_ctl");
     }
 
-    if (outfd != -1) {
-      connections.emplace_back(this->fifo_outfd);
-      connections.back().it = std::next(connections.end(), -1);
+    if (wfifo.empty()) {
+      return;
+    }
+      
+    if (mkfifo(wfifo.c_str(), 777) < 0) {
+      throw std::runtime_error("mkfifo");
+    }
+    this->fifo_outfd = open(wfifo.c_str(), O_WRONLY | O_NONBLOCK);
+    if (this->fifo_outfd < 0) {
+      throw std::runtime_error("fifo open");
+    }
 
-      epoll_event wev;
-      wev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
-      wev.data.ptr = &(connections.back());
-      if (epoll_ctl(this->epfd, EPOLL_CTL_ADD, this->fifo_outfd, &wev) == -1) {
-        throw std::runtime_error("epoll_ctl");
-      }
+    connections.emplace_back(this->fifo_outfd);
+    connections.back().it = std::next(connections.end(), -1);
+
+    epoll_event wev;
+    wev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
+    wev.data.ptr = &(connections.back());
+    if (epoll_ctl(this->epfd, EPOLL_CTL_ADD, this->fifo_outfd, &wev) == -1) {
+      throw std::runtime_error("epoll_ctl");
     }
   }
 

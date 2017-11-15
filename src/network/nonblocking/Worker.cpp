@@ -10,6 +10,12 @@ Worker::Worker(std::shared_ptr<Afina::Storage> _ps) : ps(_ps) {}
 // See Worker.h
 Worker::~Worker() {}
 
+
+void Worker::addFIFO(std::string rfifo, std::string wfifo) {
+  this->rfifo = rfifo;
+  this->wfifo = wfifo;
+}
+
 void* Worker::RunProxy(void* _args) {
   auto args = reinterpret_cast<std::pair<Worker*, int>*>(_args);
   Worker* worker_instance = args->first;
@@ -58,6 +64,7 @@ void Worker::OnRun(int server_socket) {
     // for events to avoid thundering herd type behavior.
     try {
       EpollManager manager(this->ps, this, server_socket);
+      manager.addFIFO(this->rfifo, this->wfifo);
       while(running.load()) {
         try {
           manager.processEvent();

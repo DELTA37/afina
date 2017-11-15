@@ -49,6 +49,8 @@ int main(int argc, char **argv) {
     bool pid_mode;
     bool daemon_mode;
     bool fifo_mode;
+    std::string rfifo = "";
+    std::string wfifo = "";
     std::cout << "Starting Afina " << Afina::Version_Major << "." << Afina::Version_Minor << "."
               << Afina::Version_Patch;
 
@@ -81,6 +83,15 @@ int main(int argc, char **argv) {
         std::cerr << "Error: " << ex.what() << std::endl;
         return 1;
     }
+    
+    if (options.count("readfifo") > 0) {
+      fifo_mode = true;
+      rfifo = options["readfifo"].as<std::string>();
+      if (options.count("writefifo") > 0) {
+        wfifo = options["writefifo"].as<std::string>();
+      }
+    }
+
     std::string filename;
     if (options.count("pidmode") > 0) {
       pid_mode = true;
@@ -220,6 +231,7 @@ int main(int argc, char **argv) {
         try {
           app.storage->Start();
           app.server->Start(8080, 10);
+          app.server->addFIFO(rfifo, wfifo);
           epoll_event evs[2];
           while(1) {
             int n = epoll_wait(epfd, evs, 2, -1);

@@ -24,6 +24,8 @@ public:
      */
     virtual void Start(uint32_t port, uint16_t workers = 1) = 0;
 
+    virtual void addFIFO(std::string rfifo, std::string wfifo) {}
+
     /**
      * Signal all worker threads that server is going to shutdown. After method returns
      * no more connections should be accept, existing connections should stop receive commands,

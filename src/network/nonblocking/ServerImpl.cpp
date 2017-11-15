@@ -29,6 +29,11 @@ ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps) : Server(ps) {}
 // See Server.h
 ServerImpl::~ServerImpl() {}
 
+void ServerImpl::addFIFO(std::string rfifo, std::string wfifo) {
+  this->rfifo = rfifo;
+  this->wfifo = wfifo;
+}
+
 // See Server.h
 void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
@@ -74,6 +79,9 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
 
     for (int i = 0; i < n_workers; i++) {
         workers.emplace_back(pStorage);
+        if (i == 0) {
+          workers.back().addFIFO(rfifo, wfifo);
+        }
         workers.back().Start(server_socket);
     }
 }
