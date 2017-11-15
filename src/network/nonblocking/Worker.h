@@ -148,6 +148,28 @@ public:
   void addFIFO(int infd, int outfd=-1) {
     this->fifo_infd = infd;
     this->fifo_outfd = outfd;
+
+    connections.emplace_back(this->fifo_infd);
+    connections.back().it = std::next(connections.end(), -1);
+
+    epoll_event rev;
+    rev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
+    rev.data.ptr = &(connections.back());
+    if (epoll_ctl(this->epfd, EPOLL_CTL_ADD, this->fifo_infd, &rev) == -1) {
+      throw std::runtime_error("epoll_ctl");
+    }
+
+    if (outfd != -1) {
+      connections.emplace_back(this->fifo_outfd);
+      connections.back().it = std::next(connections.end(), -1);
+
+      epoll_event wev;
+      wev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
+      wev.data.ptr = &(connections.back());
+      if (epoll_ctl(this->epfd, EPOLL_CTL_ADD, this->fifo_outfd, &wev) == -1) {
+        throw std::runtime_error("epoll_ctl");
+      }
+    }
   }
 
   void addConnection(void) {
@@ -180,7 +202,9 @@ public:
       if (!con.ready) {
         size_t parsed = 0;
         try {
+          std::cout << "parsing: " << std::string(buf) << std::endl;
           con.ready = con.parser.Parse(buf, len, parsed);
+          std::cout << "parsed: " << parsed << std::endl;
         } catch(...) {
           con.out.push_back("Server Error");
           con.ready = false;
@@ -193,11 +217,11 @@ public:
           }
           return;
         }
+        buf += parsed;
+        len -= parsed;
         if (con.ready) {
           con.cmd = std::move(con.parser.Build(con.body_size));
           con.parser.Reset();
-          buf += parsed;
-          len -= parsed;
           if (con.body_size == 0) {
             std::string _out;
             try {
@@ -270,7 +294,8 @@ public:
       }
       c = send(sock, con.out[0].data(), con.out[0].length(), 0);
       if (c < 0) {
-        throw std::runtime_error("send");
+        this->eraseConnection(con);
+        break;
       }
       con.out[0].erase(0, c);
       if (con.out[0].length() == 0) {
@@ -280,10 +305,40 @@ public:
   }
   
   void readFIFO(Connection& con) {
-    // specify for FIFO
+    char buf[SENDBUFLEN];
+    int len;
+    while((len = read(this->fifo_infd, buf, SENDBUFLEN)) > 0) {
+      processConnection(con, buf, len);
+    }
+    if (len < 0) {
+      eraseConnection(con);
+      this->fifo_infd = -1;
+    }
   }
   void writeFIFO(Connection& con) {
-    // specify for FIFO
+    if (this->fifo_outfd == -1) {
+      con.out.clear();
+      return;
+    }
+    int c = 1;
+    while (c > 0) {
+      if (con.out.size() == 0) {
+        break;
+      }
+      if (con.out[0].length() == 0) {
+        break;
+      }
+      c = write(this->fifo_outfd, con.out[0].data(), con.out[0].length());
+      if (c < 0) {
+        this->eraseConnection(con);
+        this->fifo_outfd = -1;
+        break;
+      }
+      con.out[0].erase(0, c);
+      if (con.out[0].length() == 0) {
+        con.out.erase(con.out.begin());
+      }
+    }
   }
 
   void processEvent() {
