@@ -1,13 +1,14 @@
-#include "MapBasedGlobalLockImpl.h"
+#include "MapBasedSharedLockImpl.h"
 #include <iostream>
 
 #include <mutex>
+#include <shared_mutex>
 
 namespace Afina {
 namespace Backend {
 
-// See MapBasedGlobalLockImpl.h
-bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &value) {
+// See MapBasedSharedLockImpl.h
+bool MapBasedSharedLockImpl::Put(const std::string &key, const std::string &value) {
   if (this->_now < this->_max_size) {
     this->_now += 1;
     this->_lock.lock();
@@ -22,7 +23,7 @@ bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &valu
   return true; 
 }
 
-void MapBasedGlobalLockImpl::Insert(const std::string &key, const std::string &value) {
+void MapBasedSharedLockImpl::Insert(const std::string &key, const std::string &value) {
   if (this->started) {
     StorageMap::iterator it = this->_backend.find(key);
     if (it == this->_backend.end()) {
@@ -40,7 +41,7 @@ void MapBasedGlobalLockImpl::Insert(const std::string &key, const std::string &v
   }
 }
 
-void MapBasedGlobalLockImpl::Erase(const std::string &key) {
+void MapBasedSharedLockImpl::Erase(const std::string &key) {
   StorageMap::iterator it = this->_backend.find(key);
   if (it != this->_backend.end()) {
     if (key == this->_last) {
@@ -83,11 +84,11 @@ void MapBasedGlobalLockImpl::Erase(const std::string &key) {
   }
 }
 
-// See MapBasedGlobalLockImpl.h
-bool MapBasedGlobalLockImpl::PutIfAbsent(const std::string &key, const std::string &value) {
-  this->_lock.lock();
+// See MapBasedSharedLockImpl.h
+bool MapBasedSharedLockImpl::PutIfAbsent(const std::string &key, const std::string &value) {
+  this->_lock.lock_shared();
   StorageMap::iterator it = this->_backend.find(key);
-  this->_lock.unlock();
+  this->_lock.unlock_shared();
   if (it == this->_backend.end()) {
     this->Put(key, value);
   } else {
@@ -96,11 +97,11 @@ bool MapBasedGlobalLockImpl::PutIfAbsent(const std::string &key, const std::stri
   return true; 
 }
 
-// See MapBasedGlobalLockImpl.h
-bool MapBasedGlobalLockImpl::Set(const std::string &key, const std::string &value) { 
-  this->_lock.lock();
+// See MapBasedSharedLockImpl.h
+bool MapBasedSharedLockImpl::Set(const std::string &key, const std::string &value) { 
+  this->_lock.lock_shared();
   StorageMap::iterator it = this->_backend.find(key);
-  this->_lock.unlock();
+  this->_lock.unlock_shared();
   if (it != this->_backend.end()) {
     this->Put(key, value);
   } else {
@@ -110,19 +111,19 @@ bool MapBasedGlobalLockImpl::Set(const std::string &key, const std::string &valu
   return true; 
 }
 
-// See MapBasedGlobalLockImpl.h
-bool MapBasedGlobalLockImpl::Delete(const std::string &key) { 
+// See MapBasedSharedLockImpl.h
+bool MapBasedSharedLockImpl::Delete(const std::string &key) { 
   this->_lock.lock();
   this->Erase(key);
   this->_lock.unlock();
   return true; 
 }
 
-// See MapBasedGlobalLockImpl.h
-bool MapBasedGlobalLockImpl::Get(const std::string &key, std::string &value) const{ 
-  this->_lock.lock();
+// See MapBasedSharedLockImpl.h
+bool MapBasedSharedLockImpl::Get(const std::string &key, std::string &value) const { 
+  this->_lock.lock_shared();
   StorageMap::const_iterator it = this->_backend.find(key);
-  this->_lock.unlock();
+  this->_lock.unlock_shared();
   if (it == this->_backend.end()) {
     return false; 
   } else {

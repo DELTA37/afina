@@ -1,10 +1,12 @@
-#ifndef AFINA_STORAGE_MAP_BASED_GLOBAL_LOCK_IMPL_H
-#define AFINA_STORAGE_MAP_BASED_GLOBAL_LOCK_IMPL_H
+#ifndef AFINA_STORAGE_MAP_BASED_SHARED_LOCK_IMPL_H
+#define AFINA_STORAGE_MAP_BASED_SHARED_LOCK_IMPL_H
 
 #include <map>
 #include <mutex>
 #include <string>
 #include <queue>
+#include <shared_mutex>
+
 #include <afina/Storage.h>
 
 namespace Afina {
@@ -15,10 +17,10 @@ namespace Backend {
  *
  *
  */
-class MapBasedGlobalLockImpl : public Afina::Storage {
+class MapBasedSharedLockImpl : public Afina::Storage {
 public:
-    MapBasedGlobalLockImpl(size_t max_size = 1024) : _max_size(max_size), _now(0), _last(""), _previous(""), started(false) {}
-    ~MapBasedGlobalLockImpl() {}
+    MapBasedSharedLockImpl(size_t max_size = 1024) : _max_size(max_size), _now(0), _last(""), _previous(""), started(false) {}
+    ~MapBasedSharedLockImpl() {}
 
     // Implements Afina::Storage interface
     bool Put(const std::string &key, const std::string &value) override;
@@ -42,7 +44,7 @@ private:
     typedef std::tuple<std::string, std::string, std::string> StorageValue;
     typedef std::pair<std::string, std::tuple<std::string, std::string, std::string>> StoragePair;
 
-    mutable std::mutex _lock;
+    mutable std::shared_mutex _lock;
 
     size_t _max_size;
     size_t _now;

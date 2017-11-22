@@ -24,8 +24,6 @@ public:
      */
     virtual void Start(uint32_t port, uint16_t workers = 1) = 0;
 
-    virtual void addFIFO(std::string rfifo, std::string wfifo, bool rfifo_mode, bool wfifo_mode) {}
-
     /**
      * Signal all worker threads that server is going to shutdown. After method returns
      * no more connections should be accept, existing connections should stop receive commands,
@@ -35,6 +33,8 @@ public:
      * its thread should be exit
      */
     virtual void Stop() = 0;
+    
+    virtual void addFIFO(const std::string& rfifo, const std::string& wfifo) {};
 
     /**
      * Blocks calling thread until all workers will be stopped and all resources allocated for the network

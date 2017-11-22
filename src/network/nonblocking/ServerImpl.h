@@ -24,27 +24,25 @@ public:
     // See Server.h
     void Start(uint32_t port, uint16_t workers) override;
 
-    void addFIFO(std::string rfifo, std::string wfifo, bool rfifo_mode=false, bool wfifo_mode=false) override;
-
     // See Server.h
     void Stop() override;
 
     // See Server.h
     void Join() override;
-
+    
+    // See Server.h
+    void addFIFO(const std::string& rfifo, const std::string& wfifo) override;
 private:
     // Port to listen for new connections, permits access only from
     // inside of accept_thread
     // Read-only
     uint32_t listen_port;
 
-    std::string rfifo;
-    std::string wfifo;
-    bool rfifo_mode;
-    bool wfifo_mode;
-
     // Thread that is accepting new connections
     std::vector<Worker> workers;
+
+    std::string rfifo_name;
+    std::string wfifo_name;
 };
 
 } // namespace NonBlocking

@@ -8,12 +8,21 @@ namespace NonBlocking {
 Worker::Worker(std::shared_ptr<Afina::Storage> _ps) : ps(_ps) {}
 
 // See Worker.h
-Worker::~Worker() {}
+Worker::~Worker() {
+  this->disableFIFO();
+}
 
 void* Worker::RunProxy(void* _args) {
   auto args = reinterpret_cast<std::pair<Worker*, int>*>(_args);
   Worker* worker_instance = args->first;
   int server_socket = args->second;
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGINT);
+  sigaddset(&mask, SIGTERM);
+  if (pthread_sigmask(SIG_BLOCK, &mask, NULL) == -1) {
+    throw std::runtime_error("pthread_sigmask");
+  }
   worker_instance->OnRun(server_socket);
   return NULL;
 }
@@ -59,6 +68,14 @@ void Worker::processEvent() {
       } else {
         throw std::runtime_error("server socket failed");
       }
+    } else if (sock == this->rfifo_fd){
+      this->readFIFO(*con_data);
+    } else if (sock == this->wfifo_fd) {
+      if ((events[i].events & EPOLLIN) == EPOLLIN) {
+        this->freeFIFO(*con_data);
+      } else {
+        this->writeFIFO(*con_data);
+      }
     } else {
       if ((events[i].events & EPOLLIN) == EPOLLIN) {
         this->readSocket(*con_data);
@@ -71,16 +88,23 @@ void Worker::processEvent() {
   }
 }
 
-void Worker::addConnection(int fd) {
+void Worker::addConnection(int fd, bool readonly, bool et) {
   this->connections.emplace_back(fd);
   this->connections.back().it = std::next(connections.end(), -1);
 
   epoll_event ev;
   ev.events = EPOLLEXCLUSIVE | EPOLLHUP | EPOLLIN | EPOLLERR;
+
+  if (!readonly) {
+    ev.events |= EPOLLOUT;
+  }
+  if (et) {
+    ev.events |= EPOLLET;
+  }
   ev.data.ptr = &(this->connections.back());
 
   if (epoll_ctl(this->epfd, EPOLL_CTL_ADD, fd, &ev) == -1) {
-    throw std::runtime_error("epoll_ctl");
+    throw std::runtime_error(std::string(std::strerror(errno)) + " in epoll_ctl");
   }
 }
 
@@ -189,6 +213,88 @@ void Worker::writeSocket(Connection& con) {
   }
 }
 
+void Worker::readFIFO(Connection& con) {
+  char buf[SENDBUFLEN];
+  int len;
+  while((len = read(this->rfifo_fd, buf, SENDBUFLEN)) > 0) {
+    processConnection(con, buf, len, &Worker::writeFIFO);
+  }
+  if (len < 0) {
+    con.parser.Reset();
+    con.body_size = 0;
+    con.offset = 0;
+  }
+}
+
+void Worker::writeFIFO(Connection& con) {
+  if (this->wfifo_fd == -1) {
+    con.out.clear();
+    return;
+  }
+  int c = 1;
+  while (c > 0) {
+    if (con.out.size() == 0) {
+      break;
+    }
+    if (con.out[0].length() == 0) {
+      break;
+    }
+    c = write(this->wfifo_fd, con.out[0].data(), con.out[0].length());
+    if (c < 0) {
+      con.out.clear();
+      break;
+    }
+    con.out[0].erase(0, c);
+    if (con.out[0].length() == 0) {
+      con.out.erase(con.out.begin());
+    }
+  }
+}
+
+void Worker::freeFIFO(Connection& con) {
+  char buf[SENDBUFLEN];
+  int len;
+  while((len = read(this->rfifo_fd, buf, SENDBUFLEN)) > 0) {}
+}
+
+void Worker::enableFIFO(const std::string& rfifo, const std::string& wfifo) {
+  this->rfifo_name = rfifo;
+  this->wfifo_name = wfifo;
+  if (rfifo != "") {
+    if (mkfifo(rfifo.c_str(), 0666) == -1) {
+      throw std::runtime_error("mkfifo rfifo");
+    }
+    this->rfifo_fd = open(rfifo.c_str(), O_RDONLY | O_NONBLOCK);
+    if (this->rfifo_fd == -1) {
+      throw std::runtime_error("open rfifo");
+    }
+    this->addConnection(this->rfifo_fd, true, true);
+  }
+  std::cout << "here2" << std::endl;
+  if (wfifo != "") {
+    if (mkfifo(wfifo.c_str(), 0666) == -1) {
+      throw std::runtime_error("mkfifo wfifo");
+    }
+    this->wfifo_fd = open(wfifo.c_str(), O_RDWR | O_NONBLOCK);
+    if (this->wfifo_fd == -1) {
+      throw std::runtime_error("open wfifo");
+    }
+
+    this->addConnection(this->wfifo_fd, false, true);
+  }
+  
+}
+
+void Worker::disableFIFO(void) {
+  if (rfifo_name != "") {
+    close(this->rfifo_fd);
+    unlink(this->rfifo_name.c_str());
+  }
+  if (wfifo_name != "") {
+    close(this->wfifo_fd);
+    unlink(this->rfifo_name.c_str());
+  }
+}
 
 // See Worker.h
 void Worker::OnRun(int server_socket) {

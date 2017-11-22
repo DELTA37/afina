@@ -13,6 +13,7 @@
 #include "network/nonblocking/ServerImpl.h"
 #include "network/uv/ServerImpl.h"
 #include "storage/MapBasedGlobalLockImpl.h"
+#include "storage/MapBasedSharedLockImpl.h"
 #include <signal.h>
 #include <unistd.h>
 #include <string.h>
@@ -66,7 +67,6 @@ void daemonize(void) {
     fclose(stderr);
   }
 }
-
 
 void startUV(Application& app) {
   // Init local loop. It will react to signals and performs some metrics collections. Each
@@ -167,6 +167,7 @@ int get_timerfd(void) {
 
 void startNonblocking(Application& app, std::string rfifo="", std::string wfifo="") {
   int epfd, sigfd, timerfd;
+  app.server->addFIFO(rfifo, wfifo);
   try {
     epfd = epoll_create(2);
 
@@ -190,7 +191,6 @@ void startNonblocking(Application& app, std::string rfifo="", std::string wfifo=
     }
 
     app.storage->Start();
-    //app.server->addFIFO(rfifo, wfifo, rfifo_mode, wfifo_mode);
     app.server->Start(8080, 7);
     epoll_event evs[2];
     while(1) {
@@ -264,9 +264,11 @@ int main(int argc, char **argv) try {
   if (options.count("readfifo") > 0) {
     rfifo_mode = true;
     rfifo = options["readfifo"].as<std::string>();
+    std::cout << "rfifo: " << rfifo << std::endl;
     if (options.count("writefifo") > 0) {
       wfifo_mode = true;
       wfifo = options["writefifo"].as<std::string>();
+      std::cout << "wfifo: " << wfifo << std::endl;
     }
   }
 
@@ -299,6 +301,8 @@ int main(int argc, char **argv) try {
 
   if (storage_type == "map_global") {
     app.storage = std::make_shared<Afina::Backend::MapBasedGlobalLockImpl>();
+  } else if (storage_type == "map_shared") {
+    app.storage = std::make_shared<Afina::Backend::MapBasedSharedLockImpl>();
   } else {
     throw std::runtime_error("Unknown storage type");
   }
@@ -317,7 +321,7 @@ int main(int argc, char **argv) try {
     startBlocking(app);
   } else if (network_type == "nonblocking") {
     app.server = std::make_shared<Afina::Network::NonBlocking::ServerImpl>(app.storage);
-    startNonblocking(app);
+    startNonblocking(app, rfifo, wfifo);
   } else {
     throw std::runtime_error("Unknown network type");
   }

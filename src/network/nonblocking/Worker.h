@@ -11,7 +11,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/signalfd.h>
-
+#include <errno.h>
 
 #include <memory>
 #include <mutex>
@@ -95,14 +95,18 @@ public:
     void processEvent(void);
     
     void processConnection(Connection& con, const char* buf, int len, void (Worker::*write_fn)(Connection& con)); 
-    void addConnection(int fd);
+    void addConnection(int fd, bool readonly=false, bool et=false);
     void eraseConnection(Connection& con);
 
     void readSocket(Connection& con);
     void writeSocket(Connection& con);
-
-    void readFIFO(int fd);
+    
+    void freeFIFO(Connection& con);
+    void readFIFO(Connection& con);
     void writeFIFO(Connection& con);
+
+    void enableFIFO(const std::string& rfifo, const std::string& wfifo);
+    void disableFIFO();
 protected:
     /**
      * Method executing by background thread
@@ -120,6 +124,11 @@ private:
     int server_socket;
     epoll_event events[MAXEVENTS];
     std::list<Connection> connections;
+
+    std::string rfifo_name;
+    std::string wfifo_name;
+    int rfifo_fd;
+    int wfifo_fd;
 };
 
 
