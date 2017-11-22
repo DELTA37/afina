@@ -34,19 +34,7 @@ class Executor {
         kStopped
     };
     
-    Executor(std::string name, int size) { 
-      if (name == "kRun") {
-        this->state = State::kRun;
-      } else if (name == "kStopping") {
-        this->state = State::kStopping;
-      } else if (name == "kStopped") {
-        this->state = State::kStopped;
-      }
-      for (int i = 0; i < size; ++i) {
-        this->threads.emplace_back(perform, this);
-      }
-    }
-
+    Executor(std::string name, int size); 
     ~Executor() {};
 
     /**
@@ -56,29 +44,13 @@ class Executor {
      * In case if await flag is true, call won't return until all background jobs are done and all threads are stopped
      */
 
-    void setState(State _state) {
-      std::unique_lock<std::mutex> lk(this->mutex);
-      this->state = _state;
-    } 
-    State getState(void) {
-      std::unique_lock<std::mutex> lk(this->mutex);
-      return this->state;
-    } 
-    
-    void Join(void) {
-      for (int i = 0; i < this->threads.size(); ++i) {
-        if (this->threads[i].joinable()) {
-          this->threads[i].join();
-        }
-      }
-    }
+    void setState(State _state);
 
-    void Stop(bool await = false) {
-      this->setState(State::kStopping);
-      if (await) {
-        this->Join();
-      }
-    }
+    State getState(void);    
+
+    void Join(void);
+
+    void Stop(bool await = false);
 
     /**
      * Add function to be executed on the threadpool. Method returns true in case if task has been placed
@@ -135,26 +107,6 @@ private:
      */
     State state;
 };
-
-void* perform(void* args) {
-  Executor* executor = reinterpret_cast<Executor*>(args);
-  while(executor->getState() == Executor::State::kRun) {
-    std::function<void()> task;
-    {
-      std::unique_lock<std::mutex> lk(executor->mutex);
-      executor->empty_condition.wait(lk, [&executor]() {return (executor->tasks.size() > 0) || (executor->state == Executor::State::kStopping);});
-      if (executor->state == Executor::State::kStopping) {
-        break;
-      }
-      task = executor->tasks.front();
-      executor->tasks.pop_front();
-    }
-    task();
-  }
-  return NULL;
-}
-
-
 
 } // namespace Afina
 

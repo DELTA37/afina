@@ -81,9 +81,6 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
 
     for (int i = 0; i < n_workers; i++) {
         workers.emplace_back(pStorage);
-        if (i == 0) {
-          workers.back().addFIFO(rfifo, wfifo, rfifo_mode, wfifo_mode);
-        }
         try {
           workers.back().Start(server_socket);
         } catch(std::exception& e) {
