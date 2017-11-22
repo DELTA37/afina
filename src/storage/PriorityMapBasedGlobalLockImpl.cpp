@@ -13,7 +13,7 @@ bool PriorityMapBasedGlobalLockImpl::Put(const std::string &key, const std::stri
 
 bool PriorityMapBasedGlobalLockImpl::Insert(const std::string &key, const std::string &value, InsertType type) {
   std::unique_lock<std::mutex> lk(this->_lock);
-  size_t i = std::hash(key) % this->_hash_size;
+  size_t i = std::hash<std::string>()(key) % this->_hash_size;
   bool need_pop = false;
   if (this->_backend[i].size() > this->_max_size / this->_hash_size) {
     need_pop = true;
@@ -39,7 +39,7 @@ bool PriorityMapBasedGlobalLockImpl::Insert(const std::string &key, const std::s
 
 bool PriorityMapBasedGlobalLockImpl::Erase(const std::string &key) {
   std::unique_lock<std::mutex> lk(this->_lock);
-  size_t i = std::hash<std::string>(*const_cast<std::string*>(&key)) % this->_hash_size;
+  size_t i = std::hash<std::string>()(key) % this->_hash_size;
   for (auto it = this->_backend[i].begin(); it != this->_backend[i].end(); ++it) {
     if (it->first == key) {
       this->_backend[i].erase(it);
@@ -52,7 +52,7 @@ bool PriorityMapBasedGlobalLockImpl::Erase(const std::string &key) {
 // See PriorityMapBasedGlobalLockImpl.h
 bool PriorityMapBasedGlobalLockImpl::Get(const std::string &key, std::string& value) const {
   std::unique_lock<std::mutex> lk(this->_lock);
-  size_t i = std::hash<std::string>(*const_cast<std::string*>(&key)) % this->_hash_size;
+  size_t i = std::hash<std::string>()(key) % this->_hash_size;
   for (auto it = this->_backend[i].begin(); it != this->_backend[i].end(); ++it) {
     if (it->first == key) {
       /*

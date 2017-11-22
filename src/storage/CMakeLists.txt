@@ -2,6 +2,8 @@
 set(SOURCE_FILES
     MapBasedGlobalLockImpl.cpp
     MapBasedSharedLockImpl.cpp
+    PriorityMapBasedGlobalLockImpl.cpp
+    HashTableStripedLockImpl.cpp
 )
 
 add_library(Storage ${SOURCE_FILES})

@@ -2,6 +2,7 @@
 #define AFINA_STORAGE_MAP_BASED_GLOBAL_LOCK_IMPL_H
 
 #include <map>
+#include <unordered_map>
 #include <mutex>
 #include <string>
 #include <queue>
@@ -38,7 +39,7 @@ public:
 private:
     void Insert(const std::string &key, const std::string &value);
     void Erase(const std::string &key);
-    typedef std::map<std::string, std::tuple<std::string, std::string, std::string>> StorageMap;
+    typedef std::unordered_map<std::string, std::tuple<std::string, std::string, std::string>> StorageMap;
     typedef std::tuple<std::string, std::string, std::string> StorageValue;
     typedef std::pair<std::string, std::tuple<std::string, std::string, std::string>> StoragePair;
 

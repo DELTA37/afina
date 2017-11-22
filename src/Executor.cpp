@@ -1,13 +1,9 @@
 #include <Executor.h>
 
+namespace Afina {
+
 Executor::Executor(std::string name, int size) { 
-  if (name == "kRun") {
-    this->state = State::kRun;
-  } else if (name == "kStopping") {
-    this->state = State::kStopping;
-  } else if (name == "kStopped") {
-    this->state = State::kStopped;
-  }
+  pthread_setname_np(pthread_self(), name.c_str());
   for (int i = 0; i < size; ++i) {
     this->threads.emplace_back(perform, this);
   }
@@ -51,8 +47,11 @@ void* perform(void* args) {
       task = executor->tasks.front();
       executor->tasks.pop_front();
     }
-    task();
+    try {
+      task();
+    }
   }
   return NULL;
 }
 
+} // Afina
