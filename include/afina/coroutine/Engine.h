@@ -71,12 +71,12 @@ protected:
     /**
      * Save stack of the current coroutine in the given context
      */
-    void Store(context &ctx);
+    void Store(context &ctx) volatile;
 
     /**
      * Restore stack of the given context and pass control to coroutinne
      */
-    void Restore(context &ctx);
+    void Restore(context &ctx) volatile;
 
     /**
      * Suspend current coroutine execution and execute given context
@@ -96,7 +96,7 @@ public:
      * Also there are no guarantee what coroutine will get execution, it could be caller of the current one or
      * any other which is ready to run
      */
-    void yield();
+    void yield() volatile;
 
     /**
      * Suspend current routine and transfers control to the given one, resumes its execution from the point
@@ -105,7 +105,7 @@ public:
      * If routine to pass execution to is not specified runtime will try to transfer execution back to caller
      * of the current routine, if there is no caller then this method has same semantics as yield
      */
-    void sched(void *routine);
+    void sched(void *routine) volatile;
 
     /**
      * Entry point into the engine. Prepare all internal mechanics and starts given function which is
