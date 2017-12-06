@@ -7,18 +7,18 @@
 namespace Afina {
 namespace Coroutine {
 
-void Engine::Store(context &ctx) {
+void Engine::Store(context &ctx) volatile {
   char StackEndsHere;
   size_t l = this->StackBottom - &StackEndsHere;
   std::get<1>(ctx.Stack) = l;
   delete[] std::get<0>(ctx.Stack);
   std::get<0>(ctx.Stack) = new char[l];
-  memcpy(std::get<0>(ctx.Stack), &StackEndsHere, this->StackBottom);
+  memcpy(std::get<0>(ctx.Stack), &StackEndsHere, l);
 }
 
 void Engine::Restore(context &ctx) volatile {
   char StackEndsHere;
-  size_t l = std::get<0>(ctx.Stack);
+  size_t l = std::get<1>(ctx.Stack);
   if (&StackEndsHere + std::get<1>(ctx.Stack) > this->StackBottom ) {
     char data[100];
     this->Restore(ctx);
