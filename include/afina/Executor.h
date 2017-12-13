@@ -106,6 +106,8 @@ private:
      * Flag to stop bg threads
      */
     State state;
+
+    std::string name;
 };
 
 } // namespace Afina

@@ -1,8 +1,9 @@
-#include <Executor.h>
+#include <afina/Executor.h>
 
 namespace Afina {
 
 Executor::Executor(std::string name, int size) { 
+  this->name = name;
   pthread_setname_np(pthread_self(), name.c_str());
   for (int i = 0; i < size; ++i) {
     this->threads.emplace_back(perform, this);
@@ -14,7 +15,7 @@ void Executor::setState(State _state) {
   this->state = _state;
 } 
 
-State Executor::getState(void) {
+Executor::State Executor::getState(void) {
   std::unique_lock<std::mutex> lk(this->mutex);
   return this->state;
 } 
@@ -27,7 +28,7 @@ void Executor::Join(void) {
   }
 }
 
-void Executor::Stop(bool await = false) {
+void Executor::Stop(bool await) {
   this->setState(State::kStopping);
   if (await) {
     this->Join();
@@ -36,6 +37,7 @@ void Executor::Stop(bool await = false) {
 
 void* perform(void* args) {
   Executor* executor = reinterpret_cast<Executor*>(args);
+  pthread_setname_np(pthread_self(), executor->name.c_str());
   while(executor->getState() == Executor::State::kRun) {
     std::function<void()> task;
     {
@@ -49,6 +51,8 @@ void* perform(void* args) {
     }
     try {
       task();
+    } catch(...) {
+      
     }
   }
   return NULL;
