@@ -27,6 +27,7 @@ void Engine::Restore(context &ctx) volatile {
   longjmp(ctx.Environment, 1); 
 }
 
+
 void Engine::yield() volatile {
   if (this->alive) {
     context *pr = this->alive;
@@ -36,8 +37,16 @@ void Engine::yield() volatile {
   }
 }
 
+
+
 void Engine::sched(void *routine_) volatile {
   context* ctx = static_cast<context*>(routine_);
+  while (ctx->caller != NULL) {
+    ctx = ctx->caller;
+  }
+  if (ctx == this->cur_routine) {
+    return;
+  }
   ctx->caller = this->cur_routine;
   if (this->cur_routine != NULL) {
     cur_routine->callee = ctx; 
