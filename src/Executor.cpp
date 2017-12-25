@@ -8,8 +8,7 @@ Executor::Executor(std::string name, int size) {
   this->state.store(State::kRun);
   n_running_threads.store(size);
   for (int i = 0; i < size; ++i) {
-    std::pair<Executor*, int>* arg = new std::pair<Executor*, int>(this, i);
-    this->threads.emplace_back(perform, arg);
+    this->threads.emplace_back(perform, this, i);
   }
 }
 
@@ -25,12 +24,7 @@ void Executor::Stop(bool await) {
   this->state.store(State::kStopping);
 }
 
-void* perform(void* args) {
-  auto arg = reinterpret_cast<std::pair<Executor*, int>*>(args);
-  Executor* executor = arg->first;
-  int i = arg->second;
-  delete arg;
-
+void* perform(Executor* executor, int i) {
   pthread_setname_np(pthread_self(), (executor->name + std::to_string(i)).c_str());
 
   while(executor->state.load() == Executor::State::kRun || executor->state.load() == Executor::State::kStopping) {

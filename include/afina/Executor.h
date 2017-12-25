@@ -12,7 +12,9 @@
 
 namespace Afina {
 
-static void* perform(void*);
+class Executor;
+static void* perform(Executor* executor, int i);
+
 
 /**
  * # Thread pool
@@ -21,7 +23,8 @@ class Executor {
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
-    friend void* perform(void* args);
+
+    friend void* perform(Executor* executor, int i);
 public:
     enum class State {
         // Threadpool is fully operational, tasks could be added and get executed
@@ -108,6 +111,7 @@ private:
 
     std::string name;
 };
+
 
 } // namespace Afina
 

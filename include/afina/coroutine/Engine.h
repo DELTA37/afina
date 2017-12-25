@@ -67,16 +67,15 @@ private:
      */
     context *idle_ctx;
 
-protected:
     /**
      * Save stack of the current coroutine in the given context
      */
-    void Store(context &ctx) volatile;
+    void Store(context &ctx);
 
     /**
      * Restore stack of the given context and pass control to coroutinne
      */
-    void Restore(context &ctx) volatile;
+    void Restore(context &ctx);
 
     /**
      * Suspend current coroutine execution and execute given context
@@ -96,7 +95,7 @@ public:
      * Also there are no guarantee what coroutine will get execution, it could be caller of the current one or
      * any other which is ready to run
      */
-    void yield() volatile;
+    void yield();
 
     /**
      * Suspend current routine and transfers control to the given one, resumes its execution from the point
@@ -105,7 +104,7 @@ public:
      * If routine to pass execution to is not specified runtime will try to transfer execution back to caller
      * of the current routine, if there is no caller then this method has same semantics as yield
      */
-    void sched(void *routine) volatile;
+    void sched(void *routine);
 
     /**
      * Entry point into the engine. Prepare all internal mechanics and starts given function which is
