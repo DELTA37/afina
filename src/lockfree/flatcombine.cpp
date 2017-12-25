@@ -1,7 +1,10 @@
-#include <afina/flatcombine.h>
+#include <afina/lockfree/flatcombine.h>
 
-FC::FC(void) : head(NULL), storage(_storage) {
+namespace Afina {
+
+FC::FC(Afina::Storage *_storage) : head(NULL), storage(_storage) {
   count.store(0);
+  head.store(NULL);
 }
 
 void FC::apply(Record c) {
@@ -79,3 +82,5 @@ void FC::scanPubList(void) {
     _head = _head->next;
   }
 }
+
+} // Afina

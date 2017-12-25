@@ -8,6 +8,7 @@ add_subdirectory(execute)
 add_subdirectory(protocol)
 add_subdirectory(network)
 add_subdirectory(storage)
+add_subdirectory(lockfree)
 
 # Generate version file
 set(version_file "${CMAKE_CURRENT_BINARY_DIR}/Version.cpp")
