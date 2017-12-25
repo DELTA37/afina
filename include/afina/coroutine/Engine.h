@@ -129,7 +129,7 @@ public:
             // Here: correct finish of the coroutine section
             yield();
         } else {
-            if (pc != nullptr) {
+            if (pc != NULL) {
                 Store(*idle_ctx);
                 sched(pc);
             }
@@ -189,13 +189,15 @@ public:
             cur_routine = nullptr;
 
             pc->prev = pc->next = nullptr;
-            delete std::get<0>(pc->Stack);
+            if (std::get<0>(pc->Stack) != NULL) {
+              delete std::get<0>(pc->Stack);
+            }
             delete pc;
 
             // We cannot return here, as this function "returned" once already, so here we must select some other
             // coroutine to run. As current coroutine is completed and can't be scheduled anymore, it is safe to
             // just give up and ask scheduler code to select someone else, control will never returns to this one
-            if (next != nullptr) {
+            if (next != NULL) {
                 sched(next);
             }
             Restore(*idle_ctx);

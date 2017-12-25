@@ -10,7 +10,7 @@ namespace Coroutine {
 
 void Engine::Store(context &ctx) {
   char StackEndsHere;
-  size_t l = std::abs(this->StackBottom - &StackEndsHere);
+  ptrdiff_t l = std::abs(this->StackBottom - &StackEndsHere);
 
   std::get<1>(ctx.Stack) = l;
   if (std::get<0>(ctx.Stack) != NULL) {
@@ -32,7 +32,7 @@ void Engine::Restore(context &ctx) {
   if (this->StackBottom < &StackEndsHere) {
     memcpy(this->StackBottom, std::get<0>(ctx.Stack), std::get<1>(ctx.Stack));
   } else {
-    memcpy(this->StackBottom - std::get<1>(ctx.Stack) + 1, std::get<0>(ctx.Stack), std::get<1>(ctx.Stack));
+    memcpy(this->StackBottom - int32_t(std::get<1>(ctx.Stack)) + 1, std::get<0>(ctx.Stack), std::get<1>(ctx.Stack));
   }
   longjmp(ctx.Environment, 1); 
 }
