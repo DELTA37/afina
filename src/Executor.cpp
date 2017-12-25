@@ -1,24 +1,17 @@
 #include <afina/Executor.h>
+#include <iostream>
 
 namespace Afina {
 
 Executor::Executor(std::string name, int size) { 
   this->name = name;
-  pthread_setname_np(pthread_self(), name.c_str());
+  this->state.store(State::kRun);
+  n_running_threads.store(size);
   for (int i = 0; i < size; ++i) {
-    this->threads.emplace_back(perform, this);
+    std::pair<Executor*, int>* arg = new std::pair<Executor*, int>(this, i);
+    this->threads.emplace_back(perform, arg);
   }
 }
-
-void Executor::setState(State _state) {
-  std::unique_lock<std::mutex> lk(this->mutex);
-  this->state = _state;
-} 
-
-Executor::State Executor::getState(void) {
-  std::unique_lock<std::mutex> lk(this->mutex);
-  return this->state;
-} 
 
 void Executor::Join(void) {
   for (int i = 0; i < this->threads.size(); ++i) {
@@ -29,31 +22,41 @@ void Executor::Join(void) {
 }
 
 void Executor::Stop(bool await) {
-  this->setState(State::kStopping);
-  if (await) {
-    this->Join();
-  }
+  this->state.store(State::kStopping);
 }
 
 void* perform(void* args) {
-  Executor* executor = reinterpret_cast<Executor*>(args);
-  pthread_setname_np(pthread_self(), executor->name.c_str());
-  while(executor->getState() == Executor::State::kRun) {
+  auto arg = reinterpret_cast<std::pair<Executor*, int>*>(args);
+  Executor* executor = arg->first;
+  int i = arg->second;
+  delete arg;
+
+  pthread_setname_np(pthread_self(), (executor->name + std::to_string(i)).c_str());
+
+  while(executor->state.load() == Executor::State::kRun || executor->state.load() == Executor::State::kStopping) {
     std::function<void()> task;
     {
       std::unique_lock<std::mutex> lk(executor->mutex);
-      executor->empty_condition.wait(lk, [&executor]() {return (executor->tasks.size() > 0) || (executor->state == Executor::State::kStopping);});
-      if (executor->state == Executor::State::kStopping) {
+      executor->empty_condition.wait(lk, [&executor]() { 
+        return (executor->tasks.size() > 0) || (executor->state.load() == Executor::State::kStopping); 
+      });
+      if (executor->tasks.size() > 0) {
+        task = executor->tasks.front();
+        executor->tasks.pop_front();
+      } else {
         break;
       }
-      task = executor->tasks.front();
-      executor->tasks.pop_front();
     }
     try {
       task();
     } catch(...) {
       
     }
+  }
+  executor->n_running_threads.fetch_sub(1);
+
+  if (executor->n_running_threads.load() == 0) {
+    executor->state.store(Executor::State::kStopped);
   }
   return NULL;
 }

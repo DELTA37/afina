@@ -11,7 +11,9 @@ void Engine::Store(context &ctx) volatile {
   char StackEndsHere;
   size_t l = this->StackBottom - &StackEndsHere;
   std::get<1>(ctx.Stack) = l;
-  delete[] std::get<0>(ctx.Stack);
+  if (std::get<0>(ctx.Stack) != NULL) {
+    delete[] std::get<0>(ctx.Stack);
+  }
   std::get<0>(ctx.Stack) = new char[l];
   memcpy(std::get<0>(ctx.Stack), &StackEndsHere, l);
 }
@@ -20,7 +22,6 @@ void Engine::Restore(context &ctx) volatile {
   char StackEndsHere;
   size_t l = std::get<1>(ctx.Stack);
   if (&StackEndsHere + std::get<1>(ctx.Stack) > this->StackBottom ) {
-    char data[100];
     this->Restore(ctx);
   }
   memcpy(StackBottom - std::get<1>(ctx.Stack), std::get<0>(ctx.Stack), std::get<1>(ctx.Stack));
@@ -41,13 +42,15 @@ void Engine::yield() volatile {
 
 void Engine::sched(void *routine_) volatile {
   context* ctx = static_cast<context*>(routine_);
-  while (ctx->caller != NULL) {
-    ctx = ctx->caller;
+  while (ctx->callee != NULL) {
+    ctx = ctx->callee;
   }
   if (ctx == this->cur_routine) {
-    return;
+    return ;  
   }
+
   ctx->caller = this->cur_routine;
+  
   if (this->cur_routine != NULL) {
     cur_routine->callee = ctx; 
     Store(*cur_routine); 

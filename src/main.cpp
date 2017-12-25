@@ -8,12 +8,12 @@
 #include <afina/Storage.h>
 #include <afina/Version.h>
 #include <afina/network/Server.h>
+#include <afina/Executor.h>
 
 #include "network/blocking/ServerImpl.h"
 #include "network/nonblocking/ServerImpl.h"
 #include "network/uv/ServerImpl.h"
 #include "storage/MapBasedGlobalLockImpl.h"
-#include "storage/MapBasedSharedLockImpl.h"
 #include <signal.h>
 #include <unistd.h>
 #include <string.h>
@@ -288,7 +288,15 @@ int main(int argc, char **argv) try {
       throw std::runtime_error("file is not exist");
     }
   }
-
+  Afina::Executor ex("slave", 4);
+  std::cout << std::endl;
+  ex.Execute([](){std::cout << "here" << std::endl;});
+  ex.Execute([](){std::cout << "here" << std::endl;});
+  ex.Execute([](){std::cout << "here" << std::endl;});
+  ex.Execute([](){std::cout << "here" << std::endl;});
+  ex.Stop();
+  ex.Join();
+  exit(EXIT_SUCCESS);
   // Start boot sequence
   Application app;
   std::cout << "Starting " << app_string.str() << std::endl;
@@ -301,8 +309,6 @@ int main(int argc, char **argv) try {
 
   if (storage_type == "map_global") {
     app.storage = std::make_shared<Afina::Backend::MapBasedGlobalLockImpl>();
-  } else if (storage_type == "map_shared") {
-    app.storage = std::make_shared<Afina::Backend::MapBasedSharedLockImpl>();
   } else {
     throw std::runtime_error("Unknown storage type");
   }

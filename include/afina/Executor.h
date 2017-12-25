@@ -8,6 +8,7 @@
 #include <queue>
 #include <string>
 #include <thread>
+#include <atomic>
 
 namespace Afina {
 
@@ -21,7 +22,7 @@ class Executor {
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
     friend void* perform(void* args);
-
+public:
     enum class State {
         // Threadpool is fully operational, tasks could be added and get executed
         kRun,
@@ -44,10 +45,6 @@ class Executor {
      * In case if await flag is true, call won't return until all background jobs are done and all threads are stopped
      */
 
-    void setState(State _state);
-
-    State getState(void);    
-
     void Join(void);
 
     void Stop(bool await = false);
@@ -64,7 +61,7 @@ class Executor {
         auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
         std::unique_lock<std::mutex> lock(this->mutex);
-        if (state != State::kRun) {
+        if (state.load() != State::kRun) {
             return false;
         }
 
@@ -105,7 +102,9 @@ private:
     /**
      * Flag to stop bg threads
      */
-    State state;
+    std::atomic<State> state;
+
+    std::atomic<size_t> n_running_threads;
 
     std::string name;
 };
