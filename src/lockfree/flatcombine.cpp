@@ -14,22 +14,25 @@ void FC::apply(Record c) {
 
   if (node.added == false) {
     Node* _head = NULL;
-    do {
-      Node* _head = head.load();
+    while(!head.compare_exchange_weak(_head, &node, std::memory_order_release, std::memory_order_relaxed)) {
       node.next = _head; 
-    } while(!head.compare_exchange_strong(_head, &node));
+    }
   }
+
   node.active = true;
   uint_fast8_t _count = 0; 
-  while (node.active) {
-    while((count.load() & 1) == 1 && (node.active)) {
+
+  while(node.active) {
+    while(!(count.compare_exchange_weak(_count, 1, std::memory_order_release, std::memory_order_relaxed)) && (node.active)) {
+      _count = 0;
       std::this_thread::yield();
     }
-    _count = count.load();
-    if (node.active && (_count & 1 == 0) && count.compare_exchange_strong(_count, _count + 1)) {
-      scanPubList(); 
+    if (node.active) {
+      scanPubList();
+      count.store(0, std::memory_order_release);
     }
   }
+  
 }
 
 void FC::scanPubList(void) {
