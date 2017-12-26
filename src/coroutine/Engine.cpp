@@ -11,12 +11,13 @@ namespace Coroutine {
 void Engine::Store(context &ctx) {
   char StackEndsHere;
   ptrdiff_t l = std::abs(this->StackBottom - &StackEndsHere);
-
-  std::get<1>(ctx.Stack) = l;
-  if (std::get<0>(ctx.Stack) != NULL) {
-    delete[] std::get<0>(ctx.Stack);
+  if (l >= std::get<1>(ctx.Stack)) {
+    if (std::get<0>(ctx.Stack) != NULL) {
+      delete[] std::get<0>(ctx.Stack);
+    }
+    std::get<0>(ctx.Stack) = new char[l];
   }
-  std::get<0>(ctx.Stack) = new char[l];
+  std::get<1>(ctx.Stack) = l;
   if (this->StackBottom < &StackEndsHere) {
     memcpy(std::get<0>(ctx.Stack), this->StackBottom, l);
   } else {
