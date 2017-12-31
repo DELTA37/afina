@@ -26,11 +26,10 @@ struct Node {
   bool added = false;
 };
 
+template<typename Container>
 class FC {
-  std::mutex mutex;
   std::atomic<uint_fast8_t> count;
   std::atomic<Node*> head;
-  Afina::Storage* storage;
 public:
   void apply(Record c);
   void scanPubList(void);

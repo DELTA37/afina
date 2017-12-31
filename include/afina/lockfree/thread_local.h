@@ -1,4 +1,8 @@
 #include <pthread.h>
+#include <type_traits>
+
+namespace Afina {
+namespace LockFree {
 
 template<typename T>
 class ThreadLocal {
@@ -13,7 +17,7 @@ private:
     }
   }
 public:
-  ThreadLocal(void (*_destr_fn = &(ThreadLocal::custom_destr_fn))(void*)) {
+  ThreadLocal(void (*_destr_fn)(void*) = ThreadLocal::custom_destr_fn) {
     this->destr_fn = _destr_fn;
     pthread_key_create(&this->key, this->destr_fn);
     pthread_setspecific(this->key, NULL);
@@ -25,6 +29,9 @@ public:
     pthread_setspecific(this->key, val);
   }
   T* get(void) {
-    return pthread_getspecific(this->key);
+    return reinterpret_cast<T*>(pthread_getspecific(this->key));
   }
 };
+
+} // LockFree
+} // Afina

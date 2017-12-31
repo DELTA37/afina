@@ -1,6 +1,6 @@
 # build service
 set(SOURCE_FILES
-    flatcombine.cpp
+  thread_local.cpp
 )
 
 add_library(FlatCombine ${SOURCE_FILES})
