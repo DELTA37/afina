@@ -81,6 +81,8 @@ private:
      * Suspend current coroutine execution and execute given context
      */
     // void Enter(context& ctx);
+    
+    void force_sched(void* routine_);
 
 public:
     Engine() : StackBottom(0), cur_routine(nullptr), alive(nullptr) {}
