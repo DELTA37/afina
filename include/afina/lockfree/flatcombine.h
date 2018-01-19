@@ -3,8 +3,11 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <afina/lockfree/thread_local.h>
 
 namespace Afina {
+
+namespace LockFree {
 
 template<typename Slot>
 class FC {
@@ -29,7 +32,7 @@ public:
     }
   }
 
-  void acquire_lock(void) {
+  bool acquire_lock(void) {
     uint8_t _count = 0;
     uint8_t _old = 0;
     while(count.compare_exchange_weak(_count, _count | 1, std::memory_order_release, std::memory_order_relaxed)) { // пытаемся установить мьютекс
@@ -58,10 +61,11 @@ public:
     while(!(head.compare_exchange_weak(local_node->next, local_node, std::memory_order_release, std::memory_order_relaxed))) {}
   }
 
-  FC(void);
-  ~FC(void);
+  FC(void) : count(0), head(NULL) {};
+  ~FC(void) {};
 
   virtual void flat_combine(void) {}
 };
 
+} // LockFree
 } // Afina
