@@ -7,7 +7,7 @@ namespace LockFree {
 template<typename T>
 class ThreadLocal {
 private:
-  typedef std::remove_reference_t<T> ValueType;
+  typedef typename std::remove_reference_t<T>::type ValueType;
   pthread_key_t key;
   void (*destr_fn)(void*);
   static void custom_destr_fn(void* mem) {

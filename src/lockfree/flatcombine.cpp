@@ -8,7 +8,6 @@ FC::FC(Afina::Storage *_storage) : head(NULL), storage(_storage) {
 }
 
 void FC::apply(Record c) {
-  thread_local Node node;
 
   node.r = c;
 
